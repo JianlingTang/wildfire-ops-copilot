@@ -59,13 +59,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
+        run: npm ci --prefix frontend
 
       - name: Lint
-        working-directory: frontend
-        run: npm run lint
+        run: npm run --prefix frontend lint
 
       - name: Build
-        working-directory: frontend
-        run: npm run build
+        run: npm run --prefix frontend build
