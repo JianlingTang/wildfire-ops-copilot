@@ -48,7 +48,7 @@ def analyze_and_report_tool(
         if elastic_titles
         else "Elastic MCP evidence was queried."
     )
-    payload = {
+    payload: dict[str, Any] = {
         "status": "success",
         "mode": "adk",
         "answer": (
@@ -247,7 +247,7 @@ def hotspot_visualization_tool(
         user_id=user_id,
     )
     visualization = build_hotspot_visualization(request)
-    payload = {
+    payload: dict[str, Any] = {
         "status": "success",
         "mode": "adk",
         "answer": (
