@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "query": "wildfire operational risk pattern",
+  "filters": {
+    "region_name": "Blue Mountains",
+    "time_window": "30d",
+    "evidence_type": null
+  },
+  "evidence": [
+    {
+      "evidence_id": "elastic_demo_001",
+      "source": "Elastic MCP demo fallback",
+      "type": "historical_incident",
+      "title": "Similar elevated wind and low humidity pattern",
+      "summary": "Prior local incidents escalated when gusts exceeded 55 km/h with humidity below 20%.",
+      "timestamp": "demo",
+      "region_name": "Blue Mountains"
+    }
+  ]
+}

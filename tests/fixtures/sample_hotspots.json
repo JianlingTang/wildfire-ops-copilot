@@ -1,0 +1,13 @@
+{
+  "status": "success",
+  "source": "NASA FIRMS demo fallback",
+  "data": {
+    "count_24h": 3,
+    "count_7d": 8,
+    "hotspots": [
+      {"lat": -33.69, "lon": 150.28, "confidence": "high"},
+      {"lat": -33.76, "lon": 150.35, "confidence": "nominal"},
+      {"lat": -33.64, "lon": 150.41, "confidence": "nominal"}
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "status": "success",
+  "source": "Open-Meteo demo fallback",
+  "data": {
+    "temperature_max": 34,
+    "humidity_min": 24,
+    "wind_speed_max": 35,
+    "wind_gust_max": 45,
+    "rainfall_7d": 5
+  }
+}
