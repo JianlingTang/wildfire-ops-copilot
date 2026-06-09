@@ -3,7 +3,7 @@
 import L from "leaflet";
 import { useEffect, useMemo, useRef } from "react";
 
-import { ApiHotspot, ApiOfficialWarningIncident } from "../../lib/api";
+import { ApiHotspot, ApiHotspotVisualization, ApiOfficialWarningIncident } from "../../lib/api";
 
 const australiaCenter: [number, number] = [-25.0, 134.0];
 
@@ -16,18 +16,21 @@ export default function LeafletMap({
   hotspots,
   radiusKm = 30,
   warnings,
-  riskLevel
+  riskLevel,
+  visualization
 }: {
   center?: [number, number];
   hotspots?: ApiHotspot[];
   radiusKm?: number;
   warnings?: (ApiOfficialWarningIncident & {lat: number; lon: number})[];
   riskLevel?: string | null;
+  visualization?: ApiHotspotVisualization | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const hotspotLayerRef = useRef<L.LayerGroup | null>(null);
   const warningLayerRef = useRef<L.LayerGroup | null>(null);
+  const visualizationLayerRef = useRef<L.LayerGroup | null>(null);
   const aoiCircleRef = useRef<L.Circle | null>(null);
   const canvasRendererRef = useRef<L.Canvas | null>(null);
   const renderTokenRef = useRef(0);
@@ -88,6 +91,7 @@ export default function LeafletMap({
     }).addTo(map);
     hotspotLayerRef.current = L.layerGroup().addTo(map);
     warningLayerRef.current = L.layerGroup().addTo(map);
+    visualizationLayerRef.current = L.layerGroup().addTo(map);
 
     const resizeObserver = new ResizeObserver(() => {
       scheduleInvalidate();
@@ -125,9 +129,10 @@ export default function LeafletMap({
     const map = mapRef.current;
     const hotspotLayer = hotspotLayerRef.current;
     const warningLayer = warningLayerRef.current;
+    const visualizationLayer = visualizationLayerRef.current;
     const aoiCircle = aoiCircleRef.current;
     const canvasRenderer = canvasRendererRef.current;
-    if (!map || !hotspotLayer || !warningLayer || !aoiCircle || !canvasRenderer) {
+    if (!map || !hotspotLayer || !warningLayer || !visualizationLayer || !aoiCircle || !canvasRenderer) {
       return;
     }
     renderTokenRef.current += 1;
@@ -147,6 +152,32 @@ export default function LeafletMap({
 
     hotspotLayer.clearLayers();
     warningLayer.clearLayers();
+    visualizationLayer.clearLayers();
+
+    if (visualization) {
+      visualization.contours.features.forEach((feature) => {
+        const coordinates = feature.geometry.coordinates[0] ?? [];
+        const latLngs = coordinates.map(([lon, lat]) => L.latLng(lat, lon));
+        L.polygon(latLngs, {
+          color: feature.properties.color,
+          fillColor: feature.properties.color,
+          fillOpacity: feature.properties.band === "Priority 1" ? 0.12 : 0.06,
+          weight: feature.properties.band === "Priority 1" ? 3 : 2,
+        })
+          .bindPopup(`${feature.properties.band} · ${feature.properties.radius_km} km`)
+          .addTo(visualizationLayer);
+      });
+      visualization.heatmap.cells.slice(0, 60).forEach((cell) => {
+        L.circle([cell.lat, cell.lon], {
+          color: "#b45309",
+          fillColor: "#f97316",
+          fillOpacity: Math.min(0.34, 0.08 + cell.normalized_intensity * 0.26),
+          radius: Math.max(1200, 3600 * cell.normalized_intensity),
+          renderer: canvasRenderer,
+          weight: 0
+        }).addTo(visualizationLayer);
+      });
+    }
 
     activeWarnings.forEach((warning) => {
       const position = L.latLng(warning.lat, warning.lon);
@@ -202,7 +233,7 @@ export default function LeafletMap({
     };
 
     renderBatch();
-  }, [activeHotspots, activeWarnings, center, radiusKm, riskLevel]);
+  }, [activeHotspots, activeWarnings, center, radiusKm, riskLevel, visualization]);
 
   return <div ref={containerRef} className="leafletMap h-full w-full" aria-label="Australian wildfire map" />;
 }

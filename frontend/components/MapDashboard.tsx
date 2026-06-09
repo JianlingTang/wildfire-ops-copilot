@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Layers, LocateFixed } from "lucide-react";
+import { Download, Layers, LocateFixed } from "lucide-react";
 
-import { ApiHotspot, ApiHotspotOverview, ApiOfficialWarningIncident, ApiRun } from "../lib/api";
+import { ApiHotspot, ApiHotspotOverview, ApiHotspotVisualization, ApiOfficialWarningIncident, ApiRun } from "../lib/api";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -13,10 +13,12 @@ const LeafletMap = dynamic(() => import("./leaflet/LeafletMap"), {ssr: false});
 export function MapDashboard({
   overview,
   run,
-  selectedFocus
+  selectedFocus,
+  visualization
 }: {
   overview?: ApiHotspotOverview | null;
   run?: ApiRun | null;
+  visualization?: ApiHotspotVisualization | null;
   selectedFocus?: {
     state: string;
     regionName: string;
@@ -39,6 +41,12 @@ export function MapDashboard({
         <Badge variant="outline">{mapState.warningCount} warnings</Badge>
       </div>
       <div className="absolute right-4 top-4 z-[500] flex gap-2">
+        {visualization ? (
+          <Button size="sm" variant="secondary" type="button" onClick={() => downloadVisualization(visualization)}>
+            <Download className="mr-2 h-4 w-4" />
+            Download
+          </Button>
+        ) : null}
         <Button size="sm" variant="secondary" type="button">
           <Layers className="mr-2 h-4 w-4" />
           Layers
@@ -53,9 +61,18 @@ export function MapDashboard({
           hotspots={mapState.hotspots}
           radiusKm={mapState.radiusKm}
           riskLevel={mapState.riskLevel}
+          visualization={visualization}
           warnings={mapState.warnings}
         />
       </div>
+      {visualization ? (
+        <div className="absolute bottom-4 right-4 z-[500] max-w-[min(26rem,calc(100%-2rem))] rounded-lg border bg-card/95 p-3 text-xs shadow-sm backdrop-blur">
+          <div className="font-semibold">{visualization.interpretation.priority}</div>
+          <div className="mt-1 leading-5 text-muted-foreground">{visualization.interpretation.summary}</div>
+          <div className="mt-2 leading-5 text-muted-foreground">{visualization.interpretation.recommendation}</div>
+          <div className="mt-2 text-[11px] text-slate-400">{visualization.interpretation.caveat}</div>
+        </div>
+      ) : null}
       <div className="absolute bottom-4 left-4 z-[500] grid gap-1 rounded-lg border bg-card/95 p-3 text-xs shadow-sm backdrop-blur">
         <div className="font-semibold">{mapState.regionName} operational area</div>
         <div className="text-muted-foreground">{mapState.summaryLine}</div>
@@ -63,6 +80,26 @@ export function MapDashboard({
       </div>
     </Card>
   );
+}
+
+function downloadVisualization(visualization: ApiHotspotVisualization) {
+  const csvRows = [
+    "lat,lon,density,max_power,latest_detection,normalized_intensity",
+    ...visualization.heatmap.cells.map((cell) =>
+      [cell.lat, cell.lon, cell.density, cell.max_power, cell.latest_detection, cell.normalized_intensity].join(",")
+    )
+  ];
+  const bundle = {
+    visualization,
+    csv: csvRows.join("\n")
+  };
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = visualization.downloads.json_filename || "hotspot-visualization.json";
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function buildMapState(

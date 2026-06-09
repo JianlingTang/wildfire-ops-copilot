@@ -8,6 +8,7 @@ from app.models.schemas import (
     ActionRecord,
     AlertRecord,
     ApprovalRecord,
+    MonitorTaskRecord,
     ReportRecord,
     RunRecord,
     TraceEvent,
@@ -31,6 +32,7 @@ class InMemoryStore:
         self.actions: dict[str, ActionRecord] = {}
         self.approvals: dict[str, ApprovalRecord] = {}
         self.reports: dict[str, ReportRecord] = {}
+        self.monitor_tasks: dict[str, MonitorTaskRecord] = {}
         self.audit_logs: list[dict[str, Any]] = []
 
     def create_run(self, region_id: str, region_name: str) -> RunRecord:
@@ -146,6 +148,17 @@ class InMemoryStore:
         report = ReportRecord(report_id=f"report_{uuid4().hex[:10]}", created_at=utc_now(), **payload)
         self.reports[report.report_id] = report
         return report
+
+    def create_monitor_task(self, payload: dict[str, Any]) -> MonitorTaskRecord:
+        task = MonitorTaskRecord(task_id=f"monitor_{uuid4().hex[:10]}", created_at=utc_now(), **payload)
+        self.monitor_tasks[task.task_id] = task
+        self.create_audit_log(task.created_by, "MONITOR_TASK_CREATED", task.task_id, {"region": task.region_name})
+        return task
+
+    def update_monitor_task(self, task_id: str, updates: dict[str, Any]) -> MonitorTaskRecord:
+        task = self.monitor_tasks[task_id].model_copy(update=updates)
+        self.monitor_tasks[task_id] = task
+        return task
 
     def create_audit_log(self, actor: str, event_type: str, target_id: str, metadata: dict[str, Any]) -> dict:
         record = {

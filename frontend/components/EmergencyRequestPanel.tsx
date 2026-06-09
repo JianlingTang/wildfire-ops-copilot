@@ -1,6 +1,6 @@
-import { FileText, ShieldAlert, TriangleAlert } from "lucide-react";
+import { Activity, FileText, ShieldAlert, TriangleAlert } from "lucide-react";
 
-import { ApiAction, ApiAlert, ApiOfficialWarningIncident, ApiRun } from "../lib/api";
+import { ApiAction, ApiAlert, ApiMonitorTask, ApiOfficialWarningIncident, ApiRun } from "../lib/api";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -8,12 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 export function EmergencyRequestPanel({
   actions = [],
   alerts = [],
+  monitorTasks = [],
   run,
   className,
   mode = "demo"
 }: {
   actions?: ApiAction[];
   alerts?: ApiAlert[];
+  monitorTasks?: ApiMonitorTask[];
   run?: ApiRun | null;
   className?: string;
   mode?: string;
@@ -23,7 +25,7 @@ export function EmergencyRequestPanel({
   const warningSummary = run?.evidence?.official_warnings?.data?.summary;
   const warnings = (run?.evidence?.official_warnings?.data?.incidents ?? []) as ApiOfficialWarningIncident[];
   const warningCount = run?.evidence?.official_warnings?.data?.incident_count ?? warnings.length;
-  const totalItems = alerts.length + pendingActions.length + warningCount;
+  const totalItems = alerts.length + pendingActions.length + warningCount + monitorTasks.length;
 
   return (
     <Card id="emergency-requests-panel" className={cn("flex h-full flex-col border-slate-200 shadow-sm", className)}>
@@ -63,6 +65,35 @@ export function EmergencyRequestPanel({
           ) : (
             <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-[13px] leading-5 text-slate-500">
               {warningSummary ?? "No official warnings inside the monitored radius yet."}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Monitor tasks</div>
+          {monitorTasks.length ? (
+            monitorTasks.map((task) => (
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-3" key={task.task_id}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[13px] font-medium leading-4 text-slate-800">
+                    <Activity className="h-4 w-4 text-emerald-700" />
+                    {task.region_name}
+                  </div>
+                  <Badge variant="muted">{task.status}</Badge>
+                </div>
+                <div className="mt-2 text-[11px] leading-4 text-slate-500">
+                  Refreshes every {task.interval_minutes} minutes · next {formatTimestamp(task.next_check_at)}
+                </div>
+                {task.last_risk_score != null ? (
+                  <div className="mt-1 text-[11px] text-slate-400">
+                    Last score {task.last_risk_score}/100 · {task.last_risk_level}
+                  </div>
+                ) : null}
+              </div>
+            ))
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-[13px] leading-5 text-slate-500">
+              No monitor tasks yet. Ask the agent to monitor this state every 10 minutes.
             </div>
           )}
         </div>

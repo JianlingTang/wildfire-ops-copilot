@@ -189,6 +189,73 @@ export type ApiReport = {
   created_at: string;
 };
 
+export type ApiHotspotVisualization = {
+  status: string;
+  mode: string;
+  region: {
+    region_id: string;
+    region_name: string;
+    center: [number, number] | number[];
+    radius_km: number;
+  };
+  source: string;
+  generated_at: string;
+  hotspot_count: number;
+  heatmap: {
+    cells: {
+      lat: number;
+      lon: number;
+      density: number;
+      max_power: number;
+      latest_detection: string;
+      normalized_intensity: number;
+    }[];
+    intensity_field: string;
+  };
+  contours: {
+    type: "FeatureCollection";
+    features: {
+      type: "Feature";
+      properties: {
+        band: string;
+        threshold: number;
+        color: string;
+        radius_km: number;
+      };
+      geometry: {
+        type: "Polygon";
+        coordinates: number[][][];
+      };
+    }[];
+  };
+  interpretation: {
+    summary: string;
+    cluster_center: [number, number] | number[];
+    priority: string;
+    recommendation: string;
+    caveat: string;
+  };
+  downloads: {
+    json_filename: string;
+    csv_filename: string;
+  };
+};
+
+export type ApiMonitorTask = {
+  task_id: string;
+  region_id: string;
+  region_name: string;
+  aoi: ApiAoi;
+  interval_minutes: number;
+  status: string;
+  last_risk_score: number | null;
+  last_risk_level: string | null;
+  last_checked_at: string | null;
+  next_check_at: string;
+  created_by: string;
+  created_at: string;
+};
+
 export type ChatApiResult = {
   intent: string;
   mode?: string;
@@ -281,6 +348,14 @@ export async function getActions(): Promise<{actions: ApiAction[]; approvals: Ap
   const response = await fetch(`${API_BASE_URL}/api/actions`);
   if (!response.ok) {
     throw new Error("Failed to load actions");
+  }
+  return response.json();
+}
+
+export async function getMonitorTasks(): Promise<{monitor_tasks: ApiMonitorTask[]}> {
+  const response = await fetch(`${API_BASE_URL}/api/monitor-tasks`);
+  if (!response.ok) {
+    throw new Error("Failed to load monitor tasks");
   }
   return response.json();
 }

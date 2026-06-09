@@ -8,6 +8,8 @@ from wildfire_ops_agent.tools import (
     action_command_tool,
     analyst_question_tool,
     analyze_and_report_tool,
+    hotspot_visualization_tool,
+    monitor_task_tool,
     report_request_tool,
     what_if_tool,
 )
@@ -105,6 +107,10 @@ root_agent = LlmAgent(
         "without asking to run new analysis.\n"
         "5. analyst_question_tool: use for questions such as 'why is risk high?', 'what changed?', "
         "'which area should we inspect first?', or general operational Q&A.\n"
+        "6. hotspot_visualization_tool: use when the user asks for heatmap, contour, visualization, density map, "
+        "or downloadable hotspot map analysis.\n"
+        "7. monitor_task_tool: use when the user asks to create a monitor task, monitor a state/AOI every 10 minutes, "
+        "or refresh risk repeatedly with alert-on-change behavior.\n"
         "\n"
         "Safety rules:\n"
         "- Never execute public communication, email, publishing, or field dispatch directly.\n"
@@ -124,5 +130,7 @@ root_agent = LlmAgent(
         action_command_tool,
         report_request_tool,
         analyst_question_tool,
+        hotspot_visualization_tool,
+        monitor_task_tool,
     ],
 )

@@ -21,6 +21,8 @@ import {
   ApiAlert,
   ApiHotspotFocus,
   ApiHotspotOverview,
+  ApiHotspotVisualization,
+  ApiMonitorTask,
   ApiReport,
   ApiRun,
   ApiTraceEvent,
@@ -29,6 +31,7 @@ import {
   getAlerts,
   getHotspotFocus,
   getHotspotOverview,
+  getMonitorTasks,
   getRunEvents
 } from "../lib/api";
 
@@ -96,6 +99,8 @@ export default function Home() {
   const [reports, setReports] = useState<ApiReport[]>([]);
   const [alerts, setAlerts] = useState<ApiAlert[]>([]);
   const [actions, setActions] = useState<ApiAction[]>([]);
+  const [monitorTasks, setMonitorTasks] = useState<ApiMonitorTask[]>([]);
+  const [visualization, setVisualization] = useState<ApiHotspotVisualization | null>(null);
   const [latestAnswer, setLatestAnswer] = useState<string | undefined>(undefined);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [focusLoading, setFocusLoading] = useState(false);
@@ -204,6 +209,8 @@ export default function Home() {
     setReports([]);
     setAlerts([]);
     setActions([]);
+    setMonitorTasks([]);
+    setVisualization(null);
   }, []);
 
   const openSupport = useCallback((section: SupportSection) => {
@@ -267,18 +274,37 @@ export default function Home() {
       setAlerts((current) => upsertById<ApiAlert, "alert_id">(current, alert, "alert_id"));
     }
 
-    if (result.intent === "ANALYZE_AND_REPORT" || result.intent === "ACTION_COMMAND") {
+    if (result.response?.visualization) {
+      setVisualization(result.response.visualization as ApiHotspotVisualization);
+      openSupport("trace");
+    }
+
+    if (result.response?.monitor_task) {
+      setMonitorTasks((current) =>
+        upsertById<ApiMonitorTask, "task_id">(current, result.response?.monitor_task as ApiMonitorTask, "task_id")
+      );
+      openQueue();
+    }
+
+    if (result.intent === "ANALYZE_AND_REPORT" || result.intent === "ACTION_COMMAND" || result.intent === "MONITOR_TASK") {
       void (async () => {
         try {
-          const [alertsResponse, actionsResponse] = await Promise.all([getAlerts(), getActions()]);
+          const [alertsResponse, actionsResponse, monitorResponse] = await Promise.all([
+            getAlerts(),
+            getActions(),
+            getMonitorTasks()
+          ]);
           setAlerts((current) => mergeById<ApiAlert, "alert_id">(current, alertsResponse.alerts, "alert_id"));
           setActions((current) => mergeById<ApiAction, "action_id">(current, actionsResponse.actions, "action_id"));
+          setMonitorTasks((current) =>
+            mergeById<ApiMonitorTask, "task_id">(current, monitorResponse.monitor_tasks, "task_id")
+          );
         } catch (error) {
           console.error("Failed to refresh alerts or actions", error);
         }
       })();
     }
-  }, []);
+  }, [openQueue, openSupport]);
 
   const handleApplyFocus = useCallback(() => {
     if (!draftStateSummary || focusLoading) {
@@ -432,7 +458,12 @@ export default function Home() {
             />
 
             <div className="min-h-[460px]">
-              <MapDashboard overview={overview} run={activeRun} selectedFocus={focusedSelection} />
+              <MapDashboard
+                overview={overview}
+                run={activeRun}
+                selectedFocus={focusedSelection}
+                visualization={visualization}
+              />
             </div>
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_380px]">
@@ -458,7 +489,14 @@ export default function Home() {
               />
 
               <div ref={queueRef}>
-                <EmergencyRequestPanel actions={actions} alerts={alerts} className="h-full" mode={mode} run={activeRun} />
+                <EmergencyRequestPanel
+                  actions={actions}
+                  alerts={alerts}
+                  className="h-full"
+                  mode={mode}
+                  monitorTasks={monitorTasks}
+                  run={activeRun}
+                />
               </div>
             </div>
 

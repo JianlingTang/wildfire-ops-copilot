@@ -139,6 +139,55 @@ def test_routes_action_command_to_pending_approval() -> None:
     assert response.json()["response"]["approval"]["status"] == "pending_approval"
 
 
+def test_hotspot_visualization_command_returns_downloadable_layers() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "Create a hotspot heatmap and contour visualization for this AOI.",
+            "region_id": "state_nt",
+            "region_name": "Northern Territory hotspot cluster focus",
+            "aoi": {"center": [-12.4513, 132.9192], "radius_km": 50},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "HOTSPOT_VISUALIZATION"
+    visualization = payload["response"]["visualization"]
+    assert visualization["heatmap"]["cells"]
+    assert len(visualization["contours"]["features"]) == 3
+    assert visualization["downloads"]["json_filename"].endswith(".json")
+    assert "Satellite hotspots indicate thermal anomalies" in visualization["interpretation"]["caveat"]
+
+
+def test_monitor_task_command_creates_active_task() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "Create a monitor task for this state every 10 minutes.",
+            "region_id": "state_nt",
+            "region_name": "Northern Territory hotspot cluster focus",
+            "aoi": {"center": [-12.4513, 132.9192], "radius_km": 50},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "MONITOR_TASK"
+    task = payload["response"]["monitor_task"]
+    assert task["status"] == "active"
+    assert task["interval_minutes"] == 10
+    assert task["region_name"] == "Northern Territory hotspot cluster focus"
+
+    tasks_response = client.get("/api/monitor-tasks")
+    assert tasks_response.status_code == 200
+    assert tasks_response.json()["monitor_tasks"][0]["task_id"] == task["task_id"]
+
+
 def test_action_command_does_not_execute_external_action_directly() -> None:
     client = TestClient(app)
     run_id = create_run(client)

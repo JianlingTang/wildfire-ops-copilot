@@ -21,6 +21,8 @@ from app.runtime.analysis import execute_analysis_request
 from app.runtime.base import AgentRuntime
 from app.runtime.intents import classify_intent
 from app.services.firestore_store import store
+from app.services.hotspot_visualization import build_hotspot_visualization
+from app.services.monitoring_tasks import create_monitor_task_from_chat
 from wildfire_ops_agent.agent import root_agent
 
 APP_NAME = os.getenv("ADK_APP_NAME", "wildfire_ops_agent")
@@ -133,6 +135,14 @@ def _route_deterministic_workflow(
         response = _analyze_and_report(request)
         _prepend_correction_trace(response["response"], correction_summary)
         return response
+    if intent == "HOTSPOT_VISUALIZATION":
+        payload = _hotspot_visualization_response(request)
+        _prepend_correction_trace(payload, correction_summary)
+        return {"intent": intent, "mode": "adk", "response": payload}
+    if intent == "MONITOR_TASK":
+        payload = create_monitor_task_from_chat(request)
+        _prepend_correction_trace(payload, correction_summary)
+        return {"intent": intent, "mode": "adk", "response": payload}
     if intent == "WHAT_IF":
         payload = run_what_if(request.message, run, request.region_name, request.aoi)
         _ensure_tool_trace(payload, _tool_trace_for_intent(intent, payload, request))
@@ -253,6 +263,8 @@ def _should_correct_llm_route(classified_intent: str, runtime_intent: str) -> bo
         "CHANGE_EXPLANATION": "ANALYST_QA",
         "RISK_EXPLANATION": "ANALYST_QA",
         "OPERATIONAL_PRIORITIZATION": "ANALYST_QA",
+        "HOTSPOT_VISUALIZATION": "HOTSPOT_VISUALIZATION",
+        "MONITOR_TASK": "MONITOR_TASK",
     }.get(classified_intent)
     return bool(expected_runtime_intent and runtime_intent != expected_runtime_intent)
 
@@ -375,6 +387,36 @@ def _tool_trace_for_intent(intent: str, payload: dict[str, Any], request: ChatRe
                 approval.get("status", "Human approval required."),
             ),
         ]
+    if intent == "HOTSPOT_VISUALIZATION":
+        visualization = payload.get("visualization", {})
+        return [
+            _trace_item(
+                "Main Coordinator",
+                "Selected Hotspot Visualization Workflow.",
+                visualization.get("region", {}).get("region_name", request.region_name or request.region_id),
+            ),
+            _trace_item(
+                "Hotspot Density Tool",
+                "Computed heatmap cells.",
+                f"{len(visualization.get('heatmap', {}).get('cells', []))} cells",
+            ),
+            _trace_item(
+                "Contour Tool",
+                "Generated contour GeoJSON.",
+                f"{len(visualization.get('contours', {}).get('features', []))} contour bands",
+            ),
+        ]
+    if intent == "MONITOR_TASK":
+        task = payload.get("monitor_task", {})
+        return [
+            _trace_item(
+                "Main Coordinator",
+                "Selected Monitor Task Workflow.",
+                task.get("region_name", request.region_name),
+            ),
+            _trace_item("Monitoring Scheduler", "Created recurring risk check.", "10 minute interval"),
+            _trace_item("Alert Rule", "Configured material-change alerting.", "score delta >= 12"),
+        ]
     if intent == "REPORT_REQUEST":
         report = payload.get("report", {})
         return [
@@ -414,6 +456,21 @@ def _trace_item(
     if next_step:
         item["next_step"] = next_step
     return item
+
+
+def _hotspot_visualization_response(request: ChatRequest) -> dict[str, Any]:
+    visualization = build_hotspot_visualization(request)
+    payload = {
+        "status": "success",
+        "mode": "adk",
+        "answer": (
+            f"Generated hotspot heatmap and contour analysis for {visualization['region']['region_name']}. "
+            f"{visualization['interpretation']['summary']} The visualization is ready to download."
+        ),
+        "visualization": visualization,
+    }
+    _ensure_tool_trace(payload, _tool_trace_for_intent("HOTSPOT_VISUALIZATION", payload, request))
+    return payload
 
 
 def _get_session_service() -> InMemorySessionService:

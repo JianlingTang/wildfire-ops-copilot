@@ -10,13 +10,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
 const prompts = [
   "Analyze the most active hotspot region in Australia and generate today's report.",
+  "Create a hotspot heatmap and contour visualization for this AOI.",
+  "Create a monitor task for this state every 10 minutes.",
   "What changed since yesterday?",
   "What if wind increases by 20%?",
   "Which area should we inspect first?",
   "Draft a public advisory for this alert."
 ];
 
-type ChatIntent = "analysis" | "action" | "question";
+type ChatIntent = "analysis" | "action" | "question" | "visualization" | "monitor";
 type InlineTraceStatus = "pending" | "running" | "completed" | "failed";
 type InlineTraceItem = {
   agent: string;
@@ -25,7 +27,14 @@ type InlineTraceItem = {
   status: InlineTraceStatus;
 };
 
-function loadingMessageForMessage(message: string, intent: "analysis" | "action" | "question") {
+function loadingMessageForMessage(message: string, intent: ChatIntent) {
+  const normalized = message.toLowerCase();
+  if (/(heatmap|heat map|contour|visuali[sz]|density map)/.test(normalized)) {
+    return "Generating hotspot visualization...";
+  }
+  if (/(monitor task|monitoring task|monitor .*every|10 minute|10-minute)/.test(normalized)) {
+    return "Creating monitor task...";
+  }
   if (intent === "analysis") {
     return "Running analysis...";
   }
@@ -40,6 +49,12 @@ function loadingMessageForMessage(message: string, intent: "analysis" | "action"
 
 function classifyIntent(message: string) {
   const normalized = message.toLowerCase();
+  if (/(heatmap|heat map|contour|visuali[sz]|density map|hotspot map)/.test(normalized)) {
+    return "visualization";
+  }
+  if (/(monitor task|monitoring task|monitor .*every|10 minute|10-minute)/.test(normalized)) {
+    return "monitor";
+  }
   if (/(analy|analysis|generate today's report|generate todays report|generate a report|generate report)/.test(normalized)) {
     return "analysis";
   }
@@ -47,6 +62,38 @@ function classifyIntent(message: string) {
 }
 
 function runningTraceForIntent(intent: ChatIntent): InlineTraceItem[] {
+  if (intent === "visualization") {
+    return [
+      {
+        agent: "Main Coordinator",
+        action: "Analyzing visualization request...",
+        output: "Routing to hotspot visualization workflow",
+        status: "running"
+      },
+      {
+        agent: "Hotspot Density Tool",
+        action: "Preparing heatmap and contour layers",
+        output: "AOI hotspot cells and contour bands pending",
+        status: "pending"
+      }
+    ];
+  }
+  if (intent === "monitor") {
+    return [
+      {
+        agent: "Main Coordinator",
+        action: "Analyzing monitor task request...",
+        output: "Routing to monitoring scheduler",
+        status: "running"
+      },
+      {
+        agent: "Monitoring Scheduler",
+        action: "Creating 10 minute risk refresh",
+        output: "Alert-on-change rule pending",
+        status: "pending"
+      }
+    ];
+  }
   if (intent === "analysis") {
     return [
       {
@@ -283,7 +330,15 @@ export function AgentChatBox({
           <div className="flex items-center gap-2">
             <Badge variant="outline">Demo Mode</Badge>
             <Badge variant={intent === "action" ? "elevated" : intent === "analysis" ? "muted" : "outline"}>
-              {intent === "action" ? "Action" : intent === "analysis" ? "Analysis" : "Question"}
+              {intent === "action"
+                ? "Action"
+                : intent === "analysis"
+                  ? "Analysis"
+                  : intent === "visualization"
+                    ? "Visualization"
+                    : intent === "monitor"
+                      ? "Monitor"
+                      : "Question"}
             </Badge>
           </div>
         </div>
@@ -318,6 +373,16 @@ export function AgentChatBox({
                   {selectedRegion || activeRunId
                     ? "Demo mode runs analysis against the focused AOI and records Elastic MCP evidence when available."
                     : "Select a state and radius first. Analysis runs against the focused AOI."}
+                </span>
+              ) : intent === "visualization" ? (
+                <span className="inline-flex items-center gap-1">
+                  <Play className="h-3.5 w-3.5 text-slate-500" />
+                  Creates a downloadable heatmap, contour GeoJSON, and AI map interpretation for the focused AOI.
+                </span>
+              ) : intent === "monitor" ? (
+                <span className="inline-flex items-center gap-1">
+                  <Play className="h-3.5 w-3.5 text-slate-500" />
+                  Creates a recurring 10 minute risk monitor with alert-on-change behavior.
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1">

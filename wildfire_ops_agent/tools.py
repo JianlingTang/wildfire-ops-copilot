@@ -11,6 +11,8 @@ from app.agents.workflows.action_workflow import draft_action
 from app.models.schemas import Aoi, ChatRequest
 from app.runtime.analysis import execute_analysis_request
 from app.services.firestore_store import store
+from app.services.hotspot_visualization import build_hotspot_visualization
+from app.services.monitoring_tasks import create_monitor_task_from_chat
 
 
 def analyze_and_report_tool(
@@ -223,6 +225,70 @@ def analyst_question_tool(
     return payload
 
 
+def hotspot_visualization_tool(
+    user_request: str,
+    tool_context: ToolContext,
+    region_name: str | None = None,
+    region_id: str | None = None,
+    aoi_center: list[float] | None = None,
+    radius_km: float | None = None,
+    run_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Hotspot Visualization Workflow: generate AOI heatmap cells, contour GeoJSON, interpretation, and downloads."""
+    request = _chat_request_from_context(
+        tool_context,
+        user_request,
+        region_name=region_name,
+        region_id=region_id,
+        aoi_center=aoi_center,
+        radius_km=radius_km,
+        run_id=run_id,
+        user_id=user_id,
+    )
+    visualization = build_hotspot_visualization(request)
+    payload = {
+        "status": "success",
+        "mode": "adk",
+        "answer": (
+            f"Generated hotspot heatmap and contour analysis for {visualization['region']['region_name']}. "
+            f"{visualization['interpretation']['summary']} The visualization is ready to download."
+        ),
+        "visualization": visualization,
+        "tool_trace": _visualization_tool_trace(visualization),
+    }
+    payload["tool_summary"] = payload["tool_trace"][-1]
+    _stash_result(tool_context, intent="HOTSPOT_VISUALIZATION", payload=payload)
+    return payload
+
+
+def monitor_task_tool(
+    user_request: str,
+    tool_context: ToolContext,
+    region_name: str | None = None,
+    region_id: str | None = None,
+    aoi_center: list[float] | None = None,
+    radius_km: float | None = None,
+    run_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Monitor Task Workflow: create a low-risk recurring AOI risk monitor with alert-on-change behavior."""
+    request = _chat_request_from_context(
+        tool_context,
+        user_request,
+        region_name=region_name,
+        region_id=region_id,
+        aoi_center=aoi_center,
+        radius_km=radius_km,
+        run_id=run_id,
+        user_id=user_id,
+    )
+    payload = create_monitor_task_from_chat(request)
+    payload["tool_summary"] = payload["tool_trace"][-1]
+    _stash_result(tool_context, intent="MONITOR_TASK", payload=payload)
+    return payload
+
+
 def _chat_request_from_context(
     tool_context: ToolContext,
     message: str,
@@ -372,6 +438,27 @@ def _analyst_tool_trace(payload: dict[str, Any], region_name: str) -> list[dict[
             "Answered from active run or Focus AOI context.",
             payload.get("status", "success"),
         ),
+    ]
+
+
+def _visualization_tool_trace(visualization: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _trace_item(
+            "Main Coordinator",
+            "Selected Hotspot Visualization Workflow.",
+            visualization["region"]["region_name"],
+        ),
+        _trace_item(
+            "Hotspot Density Tool",
+            "Computed heatmap cells.",
+            f"{len(visualization['heatmap']['cells'])} cells",
+        ),
+        _trace_item(
+            "Contour Tool",
+            "Generated contour GeoJSON.",
+            f"{len(visualization['contours']['features'])} contour bands",
+        ),
+        _trace_item("AI Map Interpreter", "Summarized hotspot pattern.", visualization["interpretation"]["priority"]),
     ]
 
 

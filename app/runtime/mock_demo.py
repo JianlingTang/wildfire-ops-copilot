@@ -11,6 +11,8 @@ from app.runtime.analysis import execute_analysis_request
 from app.runtime.base import AgentRuntime
 from app.runtime.intents import classify_intent
 from app.services.firestore_store import store
+from app.services.hotspot_visualization import build_hotspot_visualization
+from app.services.monitoring_tasks import create_monitor_task_from_chat
 
 
 class MockDemoRuntime(AgentRuntime):
@@ -29,6 +31,35 @@ class MockDemoRuntime(AgentRuntime):
 
         if intent == "ANALYZE_AND_REPORT":
             return self._analyze_and_report(request)
+        if intent == "HOTSPOT_VISUALIZATION":
+            visualization = build_hotspot_visualization(request)
+            return {
+                "intent": intent,
+                "mode": "demo",
+                "response": {
+                    "status": "success",
+                    "mode": "demo",
+                    "answer": (
+                        f"Generated hotspot heatmap and contour analysis for "
+                        f"{visualization['region']['region_name']}. "
+                        f"{visualization['interpretation']['summary']} The visualization is ready to download."
+                    ),
+                    "visualization": visualization,
+                    "tool_trace": [
+                        {
+                            "called": "Hotspot Visualization Tool",
+                            "did": "Generated heatmap cells and contour bands.",
+                            "output": visualization["interpretation"]["priority"],
+                            "mode": "demo",
+                            "status": "completed",
+                        }
+                    ],
+                },
+            }
+        if intent == "MONITOR_TASK":
+            payload = create_monitor_task_from_chat(request)
+            payload["mode"] = "demo"
+            return {"intent": intent, "mode": "demo", "response": payload}
         if intent == "WHAT_IF":
             return {
                 "intent": intent,

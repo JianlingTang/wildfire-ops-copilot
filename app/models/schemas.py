@@ -108,3 +108,18 @@ class ReportRecord(BaseModel):
     markdown: str
     pdf_url: str | None = None
     created_at: datetime
+
+
+class MonitorTaskRecord(BaseModel):
+    task_id: str
+    region_id: str
+    region_name: str
+    aoi: Aoi
+    interval_minutes: int = 10
+    status: Literal["active", "paused", "failed"] = "active"
+    last_risk_score: int | None = None
+    last_risk_level: RiskLevel | None = None
+    last_checked_at: datetime | None = None
+    next_check_at: datetime
+    created_by: str
+    created_at: datetime
