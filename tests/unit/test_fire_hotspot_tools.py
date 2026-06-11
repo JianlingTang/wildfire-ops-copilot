@@ -17,8 +17,9 @@ def test_validates_input_aoi() -> None:
 def test_returns_structured_status() -> None:
     result = get_fire_hotspots(Aoi())
 
-    assert result["status"] == "error"
-    assert "live data is required" in result["message"]
+    assert result["status"] == "success"
+    assert result["mode"] == "demo"
+    assert result["data"]["count_24h"] >= 1
 
 
 def test_parses_live_hotspot_response_from_dea(monkeypatch) -> None:
@@ -77,27 +78,29 @@ def test_handles_api_failure() -> None:
     assert "failure" in result["message"]
 
 
-def test_auto_region_selection_returns_provider_error_in_demo_mode() -> None:
+def test_auto_region_selection_returns_demo_region_in_demo_mode() -> None:
     result = resolve_operational_region("live_australia", "Australia Live Hotspot AOI")
 
-    assert result["region_id"] == "live_australia"
-    assert result["region_context"]["selection_mode"] == "provider_error"
-    assert result["hotspots"]["status"] == "error"
-    assert "live data is required" in result["hotspots"]["message"]
+    assert result["region_id"] == "live_qld_demo_cluster"
+    assert result["region_context"]["selection_mode"] == "demo_auto_live_hotspot"
+    assert result["hotspots"]["status"] == "success"
+    assert result["hotspots"]["mode"] == "demo"
 
 
-def test_australia_overview_returns_error_in_demo_mode() -> None:
+def test_australia_overview_returns_demo_payload_in_demo_mode() -> None:
     result = get_australia_hotspots_overview()
 
-    assert result["status"] == "error"
-    assert "live data is required" in result["message"]
+    assert result["status"] == "success"
+    assert result["mode"] == "demo"
+    assert any(state["state"] == "NT" for state in result["data"]["states"])
 
 
-def test_state_focus_returns_error_in_demo_mode() -> None:
+def test_state_focus_returns_demo_payload_in_demo_mode() -> None:
     result = get_state_hotspot_focus("NT", 50)
 
-    assert result["status"] == "error"
-    assert "live data is required" in result["message"]
+    assert result["status"] == "success"
+    assert result["mode"] == "demo"
+    assert result["data"]["state"] == "NT"
 
 
 def test_explicit_state_aoi_region_reuses_aoi_hotspots_in_demo_mode() -> None:
@@ -109,6 +112,7 @@ def test_explicit_state_aoi_region_reuses_aoi_hotspots_in_demo_mode() -> None:
     )
 
     assert result["region_context"]["selection_mode"] == "selected_aoi"
-    assert result["hotspots"]["status"] == "error"
-    assert result["hotspots"]["data"]["count_24h"] == 0
-    assert result["hotspots"]["data"]["hotspots"] == []
+    assert result["hotspots"]["status"] == "success"
+    assert result["hotspots"]["mode"] == "demo"
+    assert result["hotspots"]["data"]["count_24h"] >= 1
+    assert result["hotspots"]["data"]["hotspots"]

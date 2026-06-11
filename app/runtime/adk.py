@@ -427,7 +427,6 @@ def _fast_path_workflow_intents(intent: str) -> bool:
         "RISK_EXPLANATION",
         "OPERATIONAL_PRIORITIZATION",
         "EXPOSURE_LOOKUP",
-        "QUESTION",
     }
 
 

@@ -56,7 +56,7 @@ def get_fire_hotspots(aoi: Aoi | dict, time_window: str = "24h") -> dict:
     if validation["status"] == "error":
         return validation
     if external_data_mode() == "demo":
-        return {"status": "error", "message": "Hotspot provider is configured for demo mode; live data is required."}
+        return _demo_hotspots(time_window)
 
     errors: list[str] = []
     nasa_key = _nasa_firms_api_key()
@@ -81,7 +81,9 @@ def get_australia_hotspots_overview() -> dict:
         return cached
 
     if external_data_mode() == "demo":
-        return {"status": "error", "message": "Hotspot provider is configured for demo mode; live data is required."}
+        payload = _demo_australia_hotspot_overview()
+        _store_cached_australia_overview(payload, _demo_australia_hotspot_rows())
+        return payload
 
     try:
         rows = _fetch_australia_hotspot_rows()
@@ -184,12 +186,7 @@ def resolve_operational_region(
         }
 
     if external_data_mode() == "demo":
-        return _error_operational_region(
-            region_id,
-            region_name,
-            aoi or Aoi(),
-            "Hotspot provider is configured for demo mode; live data is required.",
-        )
+        return _demo_live_region_selection()
 
     try:
         return _select_live_hotspot_region()
@@ -796,7 +793,14 @@ def _get_or_load_australia_hotspot_rows() -> tuple[list[dict[str, Any]], str, st
         )
 
     if external_data_mode() == "demo":
-        raise RuntimeError("Hotspot provider is configured for demo mode; live data is required.")
+        rows = _demo_australia_hotspot_rows()
+        payload = _build_australia_hotspot_overview(
+            rows,
+            mode="demo",
+            source="DEA Hotspots demo overview",
+        )
+        _store_cached_australia_overview(payload, rows)
+        return rows, "demo", "DEA Hotspots demo overview", False
 
     rows = _fetch_australia_hotspot_rows()
     payload = _build_australia_hotspot_overview(

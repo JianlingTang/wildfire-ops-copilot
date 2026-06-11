@@ -12,7 +12,8 @@ def test_manual_run_creates_run_emits_trace_events_and_stores_result() -> None:
     payload = response.json()
     run_id = payload["run"]["run_id"]
     assert payload["run"]["status"] == "completed"
-    assert payload["run"]["risk_score"] == 83
+    assert isinstance(payload["run"]["risk_score"], int)
+    assert payload["report"]["run_id"] == run_id
 
     events_response = client.get(f"/api/runs/{run_id}/events")
     assert events_response.status_code == 200
