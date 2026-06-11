@@ -82,7 +82,7 @@ class RealElasticMcpProvider(ElasticEvidenceProvider):
         self.kibana_url = configured_kibana_url.rstrip("/")
         self.api_key = api_key or os.getenv("ELASTIC_API_KEY", "")
         self.mcp_url = mcp_url or os.getenv("ELASTIC_MCP_URL") or _mcp_url_from_kibana(self.kibana_url)
-        self.tool_name = tool_name or os.getenv("ELASTIC_MCP_TOOL_NAME", DEFAULT_ELASTIC_MCP_TOOL_NAME)
+        self.tool_name = tool_name or os.getenv("ELASTIC_MCP_TOOL_NAME") or DEFAULT_ELASTIC_MCP_TOOL_NAME
         self.timeout_seconds = timeout_seconds or _elastic_timeout_seconds()
 
     def query(
@@ -259,9 +259,12 @@ def _normalize_mcp_evidence(payload: Any, region_name: str | None, evidence_type
         if not isinstance(raw_source, dict):
             continue
         source: dict[str, Any] = raw_source
-        reference = source.get("reference") if isinstance(source.get("reference"), dict) else {}
-        content = source.get("content") if isinstance(source.get("content"), dict) else {}
-        snippets = content.get("snippets") if isinstance(content.get("snippets"), list) else []
+        raw_reference = source.get("reference")
+        reference: dict[str, Any] = raw_reference if isinstance(raw_reference, dict) else {}
+        raw_content = source.get("content")
+        content: dict[str, Any] = raw_content if isinstance(raw_content, dict) else {}
+        raw_snippets = content.get("snippets")
+        snippets: list[Any] = raw_snippets if isinstance(raw_snippets, list) else []
         evidence.append(
             {
                 "evidence_id": str(
@@ -274,7 +277,9 @@ def _normalize_mcp_evidence(payload: Any, region_name: str | None, evidence_type
                 ),
                 "source": "Elastic Agent Builder MCP",
                 "type": str(source.get("type") or source.get("doc_type") or evidence_type or "operational_evidence"),
-                "title": str(source.get("title") or source.get("name") or reference.get("id") or "Elastic MCP evidence"),
+                "title": str(
+                    source.get("title") or source.get("name") or reference.get("id") or "Elastic MCP evidence"
+                ),
                 "summary": str(
                     source.get("summary")
                     or source.get("text")
@@ -317,11 +322,11 @@ def _extract_candidate_documents(payload: Any) -> list[Any]:
                 return docs
         for key in ("evidence", "documents", "docs", "results", "items", "data"):
             if isinstance(result.get(key), list):
-                docs: list[Any] = []
+                nested_docs: list[Any] = []
                 for item in result[key]:
                     nested = _extract_candidate_documents(item)
-                    docs.extend(nested if nested != [item] else [item])
-                return docs
+                    nested_docs.extend(nested if nested != [item] else [item])
+                return nested_docs
             if isinstance(result.get(key), dict):
                 nested = _extract_candidate_documents(result[key])
                 if nested:

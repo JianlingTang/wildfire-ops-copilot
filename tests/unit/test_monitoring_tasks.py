@@ -8,7 +8,7 @@ def test_monitor_task_parses_hour_interval_from_user_request() -> None:
             message="Create a monitor task for this state every 2 hours.",
             region_id="state_nt",
             region_name="Northern Territory hotspot cluster focus",
-            aoi=Aoi(center=[-12.4513, 132.9192], radius_km=50),
+            aoi=Aoi(center=(-12.4513, 132.9192), radius_km=50),
         )
     )
 

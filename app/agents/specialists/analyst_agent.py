@@ -32,7 +32,11 @@ def answer_operational_question(
         missing.append("yesterday matched completed analysis run")
     if question_type == "wind_change" and current.get("weather", {}).get("wind_gust_kmh") is None:
         missing.append("current wind gust evidence")
-    if question_type == "wind_change" and previous_facts and previous_facts.get("weather", {}).get("wind_gust_kmh") is None:
+    if (
+        question_type == "wind_change"
+        and previous_facts
+        and previous_facts.get("weather", {}).get("wind_gust_kmh") is None
+    ):
         missing.append("yesterday wind gust evidence")
 
     return {

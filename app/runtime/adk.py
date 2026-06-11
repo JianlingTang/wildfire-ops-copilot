@@ -92,7 +92,10 @@ class AdkRuntime(AgentRuntime):
                 trace_id, request, conversation.conversation_id, "visualization", "Risk trend chart generated.", intent
             )
             return _finalize_chat_response_timed(
-                request, conversation, {"intent": intent, "mode": "adk", "response": payload, "trace_id": trace_id}, timing
+                request,
+                conversation,
+                {"intent": intent, "mode": "adk", "response": payload, "trace_id": trace_id},
+                timing,
             )
         if intent == "RISK_PREDICTION":
             with timing.step("tool_call", intent=intent, tool="risk_prediction"):
@@ -102,14 +105,17 @@ class AdkRuntime(AgentRuntime):
                 trace_id, request, conversation.conversation_id, "risk", "Risk prediction generated.", intent
             )
             return _finalize_chat_response_timed(
-                request, conversation, {"intent": intent, "mode": "adk", "response": payload, "trace_id": trace_id}, timing
+                request,
+                conversation,
+                {"intent": intent, "mode": "adk", "response": payload, "trace_id": trace_id},
+                timing,
             )
         fast_path = _fast_path_workflow_intents(intent)
         if fast_path:
             with timing.step("tool_call", intent=intent, tool="deterministic_workflow"):
-                response = _route_deterministic_workflow(request, intent)
-            if response is not None:
-                response["trace_id"] = trace_id
+                deterministic_response = _route_deterministic_workflow(request, intent)
+            if deterministic_response is not None:
+                deterministic_response["trace_id"] = trace_id
                 _publish_chat_event(
                     trace_id,
                     request,
@@ -118,7 +124,7 @@ class AdkRuntime(AgentRuntime):
                     f"Skipped Gemini router for deterministic {intent} workflow.",
                     intent,
                 )
-                return _finalize_chat_response_timed(request, conversation, response, timing)
+                return _finalize_chat_response_timed(request, conversation, deterministic_response, timing)
 
         try:
             with timing.step("adk_setup", intent=intent):
@@ -153,7 +159,9 @@ class AdkRuntime(AgentRuntime):
                         fallback = _route_deterministic_workflow(
                             request,
                             intent,
-                            correction_summary="Deterministic fallback ran because Gemini did not call the action workflow tool.",
+                            correction_summary=(
+                                "Deterministic fallback ran because Gemini did not call the action workflow tool."
+                            ),
                         )
                     if fallback is not None:
                         fallback["trace_id"] = trace_id
@@ -162,11 +170,14 @@ class AdkRuntime(AgentRuntime):
                     return _finalize_chat_response_timed(
                         request,
                         conversation,
-                        _with_trace_id(_context_answer_response(
-                            request,
-                            final_text,
-                            "Gemini answered from context_json without workflow tools.",
-                        ), trace_id),
+                        _with_trace_id(
+                            _context_answer_response(
+                                request,
+                                final_text,
+                                "Gemini answered from context_json without workflow tools.",
+                            ),
+                            trace_id,
+                        ),
                         timing,
                     )
                 with timing.step("repair_llm_call", intent=intent, reason="missing_runtime_intent"):
@@ -175,7 +186,8 @@ class AdkRuntime(AgentRuntime):
                         user_id,
                         session_id,
                         request,
-                        "The first Gemini/Vertex AI turn did not call a workflow tool or produce a usable final answer.",
+                        "The first Gemini/Vertex AI turn did not call a workflow tool or produce a usable final "
+                        "answer.",
                     )
                 if repair_text:
                     return _finalize_chat_response_timed(
@@ -221,7 +233,9 @@ class AdkRuntime(AgentRuntime):
                     fallback = _route_deterministic_workflow(
                         request,
                         intent,
-                        correction_summary="Deterministic fallback ran because Gemini did not return an action approval payload.",
+                        correction_summary=(
+                            "Deterministic fallback ran because Gemini did not return an action approval payload."
+                        ),
                     )
                 if fallback is not None:
                     fallback["trace_id"] = trace_id
@@ -232,7 +246,9 @@ class AdkRuntime(AgentRuntime):
                         fallback = _route_deterministic_workflow(
                             request,
                             intent,
-                            correction_summary="Deterministic fallback ran because Gemini did not return an action workflow payload.",
+                            correction_summary=(
+                                "Deterministic fallback ran because Gemini did not return an action workflow payload."
+                            ),
                         )
                     if fallback is not None:
                         fallback["trace_id"] = trace_id
@@ -452,7 +468,7 @@ def _route_local_analyst_synthesis(
     _prepend_correction_trace(payload, correction_summary)
     if payload.get("requires_synthesis"):
         _apply_synthesis_answer(payload, None, request)
-    response = {"intent": intent, "mode": "adk", "response": payload}
+    response: dict[str, Any] = {"intent": intent, "mode": "adk", "response": payload}
     if run:
         response["run"] = run
     return response
@@ -518,7 +534,10 @@ def _llm_repair_response(intent: str, answer: str) -> dict[str, Any]:
                 _trace_item(
                     "Main Coordinator",
                     "Recovered with Gemini repair answer.",
-                    "Gemini/Vertex AI produced a fallback answer after the initial ADK turn returned no usable payload.",
+                    (
+                        "Gemini/Vertex AI produced a fallback answer after the initial ADK turn returned no usable "
+                        "payload."
+                    ),
                 )
             ],
         },
@@ -687,7 +706,11 @@ def _missing_tool_result(response: dict[str, Any]) -> bool:
 
 def _missing_action_payload(response: dict[str, Any]) -> bool:
     payload = response.get("response")
-    return not (isinstance(payload, dict) and isinstance(payload.get("action"), dict) and isinstance(payload.get("approval"), dict))
+    return not (
+        isinstance(payload, dict)
+        and isinstance(payload.get("action"), dict)
+        and isinstance(payload.get("approval"), dict)
+    )
 
 
 def _needs_focus_aoi_fallback(response: dict[str, Any], request: ChatRequest, classified_intent: str) -> bool:
@@ -1007,13 +1030,16 @@ def _message_with_operational_context(request: ChatRequest) -> str:
         f"context_json: {json.dumps(context, default=str)}\n"
         f"Compressed conversation context: {compressed_context or 'none'}\n"
         "First decide whether a workflow tool is required. Direct context-only answers are allowed only for factual "
-        "lookups already present in context_json, such as AOI center, radius, latest run id, risk score, report metadata, "
-        "or Elastic evidence file names. Operational judgment or evidence synthesis questions, including inspection priority, "
-        "why risk is high, what changed, wind or weather change since yesterday, exposed assets, spatial exposure, roads, "
-        "towns, protected areas, recommendations, or next steps, must call analyst_question_tool. Call other tools only for analysis, "
-        "scenario computation, report generation, visualization, monitoring, approval-gated actions, or fresh external retrieval. "
+        "lookups already present in context_json, such as AOI center, radius, latest run id, risk score, report "
+        "metadata, "
+        "or Elastic evidence file names. Operational judgment or evidence synthesis questions, including inspection "
+        "priority, why risk is high, what changed, wind or weather change since yesterday, exposed assets, spatial "
+        "exposure, roads, towns, protected areas, recommendations, or next steps, must call analyst_question_tool. "
+        "Call other tools only for analysis, scenario computation, report generation, visualization, monitoring, "
+        "approval-gated actions, or fresh external retrieval. "
         "When a tool returns structured evidence, synthesize the final answer for the exact requested dimension. "
-        "If the evidence packet includes missing baseline data, say what is missing instead of answering a nearby question. "
+        "If the evidence packet includes missing baseline data, say what is missing instead of answering a nearby "
+        "question. "
         "If context_json lacks the answer, say exactly what is missing. When calling a workflow tool, pass "
         "the operator request and any available region_id, region_name, aoi_center, radius_km, run_id, "
         "and user_id values."
@@ -1036,7 +1062,8 @@ def _repair_message_with_operational_context(request: ChatRequest, reason: str) 
         "Do not call tools in this repair turn. If a required workflow tool did not run, do not claim that an action, "
         "report, monitor, visualization, or analysis was created. Instead explain what failed and what the operator "
         "can safely infer from the available context. For inspection-priority or risk questions, answer directly from "
-        "latest_run recommendations, evidence, and selected_aoi when available. If the supplied context is insufficient, "
+        "latest_run recommendations, evidence, and selected_aoi when available. If the supplied context is "
+        "insufficient, "
         "say exactly what is missing."
     )
 
@@ -1204,13 +1231,18 @@ def _valid_synthesis_answer(answer: str, payload: dict[str, Any]) -> bool:
     lowered = answer.lower()
     question_type = str(payload.get("question_type") or "")
     if payload.get("missing") and not any(
-        term in lowered for term in ["missing", "cannot", "can't", "do not have", "don't have", "need", "no baseline"]
+        term in lowered
+        for term in ["missing", "cannot", "can't", "do not have", "don't have", "need", "no baseline"]
     ):
         return False
     if question_type == "wind_change":
-        return "wind" in lowered and any(term in lowered for term in ["yesterday", "baseline", "previous", "missing"])
+        return "wind" in lowered and any(
+            term in lowered for term in ["yesterday", "baseline", "previous", "missing"]
+        )
     if question_type == "weather_change":
-        return "weather" in lowered and any(term in lowered for term in ["yesterday", "baseline", "previous", "missing"])
+        return "weather" in lowered and any(
+            term in lowered for term in ["yesterday", "baseline", "previous", "missing"]
+        )
     if question_type == "overall_change":
         return any(term in lowered for term in ["changed", "change", "yesterday", "baseline", "previous"])
     if question_type == "exposure_lookup":
@@ -1220,10 +1252,14 @@ def _valid_synthesis_answer(answer: str, payload: dict[str, Any]) -> bool:
 
 def _safe_synthesis_answer(payload: dict[str, Any], request: ChatRequest) -> str:
     question_type = str(payload.get("question_type") or "operational_summary")
-    facts = payload.get("facts") if isinstance(payload.get("facts"), dict) else {}
-    current = facts.get("current", {}) if isinstance(facts.get("current"), dict) else {}
-    previous = facts.get("previous") if isinstance(facts.get("previous"), dict) else None
-    deltas = facts.get("deltas", {}) if isinstance(facts.get("deltas"), dict) else {}
+    raw_facts = payload.get("facts")
+    facts: dict[str, Any] = raw_facts if isinstance(raw_facts, dict) else {}
+    raw_current = facts.get("current")
+    current: dict[str, Any] = raw_current if isinstance(raw_current, dict) else {}
+    raw_previous = facts.get("previous")
+    previous: dict[str, Any] | None = raw_previous if isinstance(raw_previous, dict) else None
+    raw_deltas = facts.get("deltas")
+    deltas: dict[str, Any] = raw_deltas if isinstance(raw_deltas, dict) else {}
     missing = [str(item) for item in payload.get("missing", [])]
     region = current.get("region_name") or request.region_name or request.region_id or "the selected AOI"
     if payload.get("status") == "missing_context" and not current:
@@ -1240,11 +1276,17 @@ def _safe_synthesis_answer(payload: dict[str, Any], request: ChatRequest) -> str
     if question_type == "inspection_priority":
         recommendations = payload.get("recommendations") or []
         first = str(recommendations[0]) if recommendations else "inspect the densest active hotspot cluster first"
-        return f"For {region}, inspect this first: {first}. This is based on the latest run drivers and spatial exposure evidence."
+        return (
+            f"For {region}, inspect this first: {first}. This is based on the latest run drivers and spatial exposure "
+            "evidence."
+        )
     if question_type == "risk_explanation":
         drivers = _driver_names(current)
         risk = _risk_text(current)
-        return f"{region} is {risk}. The leading drivers are {drivers}, supported by the latest hotspot, weather, spatial, and Elastic evidence."
+        return (
+            f"{region} is {risk}. The leading drivers are {drivers}, supported by the latest hotspot, weather, "
+            "spatial, and Elastic evidence."
+        )
     return f"{region} is {_risk_text(current)} based on the latest completed analysis run."
 
 
@@ -1260,7 +1302,10 @@ def _wind_change_answer(
     if missing or not previous or not delta:
         missing_text = ", ".join(missing or ["yesterday wind baseline"])
         current_text = f" Current wind gust evidence is {current_wind} km/h." if current_wind is not None else ""
-        return f"I cannot calculate how wind changed since yesterday for {region} because {missing_text} is missing.{current_text}"
+        return (
+            f"I cannot calculate how wind changed since yesterday for {region} because {missing_text} is "
+            f"missing.{current_text}"
+        )
     return (
         f"Wind changed since yesterday in {region}: gusts are {delta['current']:g} km/h now versus "
         f"{delta['previous']:g} km/h previously, a {delta['delta']:+g} km/h change."
@@ -1290,7 +1335,10 @@ def _weather_change_answer(
         parts.append(f"wind gusts {wind['delta']:+g} km/h")
     if humidity:
         parts.append(f"minimum humidity {humidity['delta']:+g} points")
-    return f"Weather changed since yesterday in {region}: {', '.join(parts) or 'no comparable weather deltas were available'}."
+    return (
+        f"Weather changed since yesterday in {region}: "
+        f"{', '.join(parts) or 'no comparable weather deltas were available'}."
+    )
 
 
 def _overall_change_answer(

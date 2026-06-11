@@ -21,5 +21,10 @@ def chat(request: ChatRequest) -> dict:
     elif isinstance(response, dict):
         response["timing_trace"] = timing.snapshot()
     if isinstance(response, dict):
-        print(json.dumps({"event": "chat_timing", "trace_id": response.get("trace_id"), "timing": response.get("timing_trace")}, default=str))
+        print(
+            json.dumps(
+                {"event": "chat_timing", "trace_id": response.get("trace_id"), "timing": response.get("timing_trace")},
+                default=str,
+            )
+        )
     return response

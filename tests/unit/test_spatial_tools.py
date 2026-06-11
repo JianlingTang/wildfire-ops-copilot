@@ -29,7 +29,9 @@ def test_returns_live_spatial_summary(monkeypatch) -> None:
         return DummyResponse([])
 
     def fake_post(*args, **kwargs):
-        return DummyResponse({"elements": [{"tags": {"name": "Blue Mountains National Park", "boundary": "protected_area"}}]})
+        return DummyResponse(
+            {"elements": [{"tags": {"name": "Blue Mountains National Park", "boundary": "protected_area"}}]}
+        )
 
     monkeypatch.setattr("app.tools.spatial_tools.httpx.get", fake_get)
     monkeypatch.setattr("app.tools.spatial_tools.httpx.post", fake_post)

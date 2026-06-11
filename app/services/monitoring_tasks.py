@@ -16,7 +16,9 @@ _INTERVAL_PATTERN = re.compile(r"\b(\d{1,4})\s*-?\s*(minutes?|mins?|hours?|hrs?)
 
 
 def create_monitor_task_from_chat(request: ChatRequest, interval_minutes: int | None = None) -> dict[str, Any]:
-    resolved_interval_minutes = interval_minutes or _parse_interval_minutes(request.message) or DEFAULT_MONITOR_INTERVAL_MINUTES
+    resolved_interval_minutes = (
+        interval_minutes or _parse_interval_minutes(request.message) or DEFAULT_MONITOR_INTERVAL_MINUTES
+    )
     region = resolve_operational_region(
         request.region_id,
         request.region_name or request.region_id.replace("_", " ").title(),

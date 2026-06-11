@@ -105,7 +105,8 @@ def _format_assets_monitoring_lines(run: RunRecord) -> list[str]:
         )
     else:
         lines.append(
-            "- AI monitoring recommendation: continue hotspot, wind, humidity, rainfall, and official-warning monitoring; "
+            "- AI monitoring recommendation: continue hotspot, wind, humidity, rainfall, and official-warning "
+            "monitoring; "
             "refresh spatial exposure if the AOI shifts."
         )
     return lines

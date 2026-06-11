@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from app.models.schemas import (
@@ -119,7 +119,7 @@ class InMemoryStore:
         self,
         conversation_id: str,
         *,
-        role: str,
+        role: Literal["user", "assistant"],
         content: str,
         intent: str | None = None,
         tool_trace: list[dict[str, Any]] | None = None,

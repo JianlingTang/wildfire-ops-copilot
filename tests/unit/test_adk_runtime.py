@@ -286,7 +286,9 @@ def test_adk_runtime_validator_corrects_off_target_wind_synthesis(monkeypatch) -
     completed = store.complete_run(run.run_id, {}, {"risk_score": 69, "risk_level": "HIGH"}, ["Inspect first"])
     monkeypatch.setattr("app.runtime.adk._ensure_vertex_configuration", lambda: None)
     monkeypatch.setattr("app.runtime.adk._get_session_service", lambda: session_service)
-    monkeypatch.setattr("app.runtime.adk._get_runner", lambda: GenericSynthesisRunner(session_service, completed.run_id))
+    monkeypatch.setattr(
+        "app.runtime.adk._get_runner", lambda: GenericSynthesisRunner(session_service, completed.run_id)
+    )
 
     result = AdkRuntime().route_chat(
         ChatRequest(
@@ -464,7 +466,9 @@ def test_adk_runtime_action_intent_falls_back_when_llm_does_not_call_tool(monkey
             )
             session.state.update(state_delta or {})
             if self.call_count == 2:
-                yield FakeEvent("I could not create a public advisory because the required action workflow did not run.")
+                yield FakeEvent(
+                    "I could not create a public advisory because the required action workflow did not run."
+                )
                 return
             yield FakeEvent("I can draft that.")
 

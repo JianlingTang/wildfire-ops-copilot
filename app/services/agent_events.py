@@ -124,7 +124,7 @@ def _write_bigquery_event(event: AgentEventRecord) -> None:
     if not table:
         return
     try:
-        from google.cloud import bigquery  # type: ignore[import-not-found]
+        from google.cloud import bigquery
 
         client = bigquery.Client()
         errors = client.insert_rows_json(table, [event.model_dump(mode="json")])

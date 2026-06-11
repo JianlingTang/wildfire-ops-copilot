@@ -77,13 +77,22 @@ def _draft_text(message: str, action_type: str, region_name: str, run: RunRecord
     if "asset" in lower_message or "infrastructure" in lower_message:
         lines.append(_asset_sentence(exposure["assets"], exposure["protected_areas"], exposure["towns"]))
     if action_type == "field_team_brief":
-        lines.append("Use this as an internal brief only; confirm access, crew safety, and official incident updates before fielding tasks.")
+        lines.append(
+            "Use this as an internal brief only; confirm access, crew safety, and official incident updates before "
+            "fielding tasks."
+        )
     elif action_type == "emergency_services_email":
-        lines.append("Please verify official warning status and local access constraints before any external distribution.")
+        lines.append(
+            "Please verify official warning status and local access constraints before any external distribution."
+        )
     elif action_type == "call_script":
-        lines.append("Operator note: keep this script informational and refer emergency instructions to the responsible agency.")
+        lines.append(
+            "Operator note: keep this script informational and refer emergency instructions to the responsible agency."
+        )
     else:
-        lines.append("Check official emergency channels for current warnings and follow instructions from responsible agencies.")
+        lines.append(
+            "Check official emergency channels for current warnings and follow instructions from responsible agencies."
+        )
     lines.append("This draft is pending human approval and official-source verification before release.")
     return " ".join(lines)
 
@@ -124,8 +133,14 @@ def _warning_status(run: RunRecord | None) -> str:
 
 def _road_sentence(roads: list[str]) -> str:
     if roads:
-        return f"Affected road watchlist: {_join_limited(roads)}; confirm closures or access restrictions with official road and fire agencies."
-    return "Affected roads were requested, but no road watchlist is available in the current evidence; verify access routes before publication."
+        return (
+            f"Affected road watchlist: {_join_limited(roads)}; confirm closures or access restrictions with official "
+            "road and fire agencies."
+        )
+    return (
+        "Affected roads were requested, but no road watchlist is available in the current evidence; verify access "
+        "routes before publication."
+    )
 
 
 def _asset_sentence(assets: list[str], protected_areas: list[str], towns: list[str]) -> str:
@@ -137,7 +152,10 @@ def _asset_sentence(assets: list[str], protected_areas: list[str], towns: list[s
     if towns:
         parts.append(f"nearby towns: {_join_limited(towns)}")
     if not parts:
-        return "Affected assets were requested, but no asset watchlist is available in the current evidence; verify local exposure before publication."
+        return (
+            "Affected assets were requested, but no asset watchlist is available in the current evidence; verify local "
+            "exposure before publication."
+        )
     return f"Affected asset watchlist includes {'; '.join(parts)}."
 
 

@@ -21,7 +21,9 @@ def prepare_conversation(request: ChatRequest) -> tuple[ConversationRecord, Chat
     )
     effective_run_id = request.run_id or conversation.run_id
     if effective_run_id != request.run_id or conversation.conversation_id != request.conversation_id:
-        request = request.model_copy(update={"run_id": effective_run_id, "conversation_id": conversation.conversation_id})
+        request = request.model_copy(
+            update={"run_id": effective_run_id, "conversation_id": conversation.conversation_id}
+        )
     store.append_chat_message(
         conversation.conversation_id,
         role="user",
@@ -89,7 +91,8 @@ def finalize_chat_response(
     conversation: ConversationRecord,
     response: dict[str, Any],
 ) -> dict[str, Any]:
-    payload = response.get("response") if isinstance(response.get("response"), dict) else {}
+    raw_payload = response.get("response")
+    payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
     run = response.get("run")
     run_id = _run_id_from_response(response, request, conversation)
     context_run = run if isinstance(run, RunRecord) else (store.runs.get(run_id) if run_id else None)
@@ -166,7 +169,9 @@ def build_context_summary(conversation: ConversationRecord, run: RunRecord | Non
     return " ".join(parts).strip()
 
 
-def _run_id_from_response(response: dict[str, Any], request: ChatRequest, conversation: ConversationRecord) -> str | None:
+def _run_id_from_response(
+    response: dict[str, Any], request: ChatRequest, conversation: ConversationRecord
+) -> str | None:
     run = response.get("run")
     if isinstance(run, RunRecord):
         return run.run_id
