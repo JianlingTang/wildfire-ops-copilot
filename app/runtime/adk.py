@@ -31,6 +31,7 @@ from app.services.chat_conversations import (
 )
 from app.services.firestore_store import store
 from app.services.hotspot_visualization import build_hotspot_visualization
+from app.services.mixed_intents import build_exposure_action_response, is_exposure_action_request
 from app.services.monitoring_tasks import create_monitor_task_from_chat
 from app.services.risk_trend import build_risk_prediction_response, build_risk_trend_response
 from app.services.timing_trace import TimingTrace
@@ -110,6 +111,20 @@ class AdkRuntime(AgentRuntime):
                 {"intent": intent, "mode": "adk", "response": payload, "trace_id": trace_id},
                 timing,
             )
+        if is_exposure_action_request(request.message):
+            with timing.step("tool_call", intent="EXPOSURE_ACTION", tool="mixed_exposure_action"):
+                run = completed_run_for_request(request, conversation)
+                response = build_exposure_action_response(request, run, mode="adk")
+            response["trace_id"] = trace_id
+            _publish_artifact_event(
+                trace_id,
+                request,
+                conversation.conversation_id,
+                "approval",
+                "Approval requested for mixed exposure/action request.",
+                "EXPOSURE_ACTION",
+            )
+            return _finalize_chat_response_timed(request, conversation, response, timing)
         fast_path = _fast_path_workflow_intents(intent)
         if fast_path:
             with timing.step("tool_call", intent=intent, tool="deterministic_workflow"):

@@ -19,6 +19,7 @@ from app.services.chat_conversations import (
 )
 from app.services.firestore_store import store
 from app.services.hotspot_visualization import build_hotspot_visualization
+from app.services.mixed_intents import build_exposure_action_response, is_exposure_action_request
 from app.services.monitoring_tasks import create_monitor_task_from_chat
 from app.services.risk_trend import build_risk_prediction_response, build_risk_trend_response
 
@@ -58,6 +59,19 @@ class MockDemoRuntime(AgentRuntime):
         run = store.runs.get(request.run_id) if request.run_id else store.get_latest_run(request.region_id)
         if run is None and request.region_id == settings.demo_region_id:
             run = store.get_latest_run()
+
+        if is_exposure_action_request(request.message):
+            response = build_exposure_action_response(request, run, mode="demo")
+            response["trace_id"] = trace_id
+            _publish_artifact_event(
+                trace_id,
+                request,
+                conversation.conversation_id,
+                "approval",
+                "Approval requested for mixed exposure/action request.",
+                "EXPOSURE_ACTION",
+            )
+            return finalize_chat_response(request, conversation, response)
 
         if intent == "ANALYZE_AND_REPORT":
             _publish_artifact_event(

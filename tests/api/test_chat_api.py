@@ -232,6 +232,36 @@ def test_routes_action_command_to_pending_approval() -> None:
     assert response.json()["response"]["approval"]["status"] == "pending_approval"
 
 
+def test_mixed_exposure_and_alert_request_creates_approval_draft() -> None:
+    client = TestClient(app)
+    analysis = create_selected_analysis(client)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": (
+                "What are main roads and assets within this ROI? "
+                "Generate an alert for people to avoid this area."
+            ),
+            "conversation_id": analysis["conversation_id"],
+            "run_id": analysis["run"]["run_id"],
+            "region_id": "state_nt",
+            "region_name": "Northern Territory hotspot cluster focus",
+            "aoi": {"center": [-12.4513, 132.9192], "radius_km": 50},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "EXPOSURE_ACTION"
+    assert payload["response"]["decomposition"] == ["EXPOSURE_LOOKUP", "ACTION_COMMAND"]
+    assert "Critical assets" in payload["response"]["exposure_answer"]
+    assert payload["response"]["action"]["status"] == "pending_approval"
+    assert payload["response"]["approval"]["status"] == "pending_approval"
+    assert "Avoid the affected area" in payload["response"]["action"]["draft"]
+    assert len(payload["response"]["tool_trace"]) >= 4
+
+
 def test_hotspot_visualization_command_returns_downloadable_layers() -> None:
     client = TestClient(app)
     analysis = create_selected_analysis(client)
