@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useDeferredValue, useEffect, useState } from "react";
-import { CheckCircle2, CircleDashed, Clock3, Play, Send, Sparkles, TriangleAlert } from "lucide-react";
+import { CheckCircle2, CircleDashed, Clock3, Download, Play, Send, Sparkles, TriangleAlert } from "lucide-react";
 
-import { ApiAoi, ChatApiResult, sendChat } from "../lib/api";
+import { ApiAoi, ApiHotspotVisualization, ChatApiResult, sendChat } from "../lib/api";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -264,6 +264,7 @@ export function AgentChatBox({
   const [message, setMessage] = useState(prompts[0]);
   const [answer, setAnswer] = useState("Ask the agent to analyze the region, answer a question, or draft an action.");
   const [inlineTrace, setInlineTrace] = useState<InlineTraceItem[]>([]);
+  const [generatedVisualization, setGeneratedVisualization] = useState<ApiHotspotVisualization | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const deferredMessage = useDeferredValue(message);
   const intent = classifyIntent(deferredMessage);
@@ -291,6 +292,7 @@ export function AgentChatBox({
     }
     setIsSubmitting(true);
     setAnswer(loadingMessageForMessage(message, intent));
+    setGeneratedVisualization(null);
     setInlineTrace(runningTraceForIntent(intent));
     try {
       const result = await sendChat(message, {
@@ -306,6 +308,7 @@ export function AgentChatBox({
           "Request completed."
       );
       setInlineTrace(completedTraceForResult(result, intent));
+      setGeneratedVisualization(result.response?.visualization ?? null);
       await onResult?.(result);
     } catch (error) {
       setAnswer(error instanceof Error ? error.message : "Chat request failed.");
@@ -406,11 +409,47 @@ export function AgentChatBox({
           </div>
         </form>
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">{answer}</div>
+        <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+          <div>{answer}</div>
+          {generatedVisualization ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+              <div>
+                <div className="font-semibold text-slate-800">Hotspot visualization package ready</div>
+                <div className="text-xs text-slate-500">
+                  Includes heatmap cells, contour GeoJSON, CSV rows, and AI interpretation.
+                </div>
+              </div>
+              <Button size="sm" type="button" onClick={() => downloadVisualization(generatedVisualization)}>
+                <Download className="mr-2 h-4 w-4" />
+                Download heatmap + contours
+              </Button>
+            </div>
+          ) : null}
+        </div>
         <InlineAgentTrace items={inlineTrace} isRunning={isSubmitting} />
       </CardContent>
     </Card>
   );
+}
+
+function downloadVisualization(visualization: ApiHotspotVisualization) {
+  const csvRows = [
+    "lat,lon,density,max_power,latest_detection,normalized_intensity",
+    ...visualization.heatmap.cells.map((cell) =>
+      [cell.lat, cell.lon, cell.density, cell.max_power, cell.latest_detection, cell.normalized_intensity].join(",")
+    )
+  ];
+  const bundle = {
+    visualization,
+    csv: csvRows.join("\n")
+  };
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = visualization.downloads.json_filename || "hotspot-visualization.json";
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function InlineAgentTrace({items, isRunning}: {items: InlineTraceItem[]; isRunning: boolean}) {
