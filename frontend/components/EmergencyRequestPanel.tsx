@@ -1,8 +1,10 @@
-import { Activity, FileText, ShieldAlert, TriangleAlert } from "lucide-react";
+import { useState } from "react";
+import { Activity, CheckCircle2, FileText, ShieldAlert, TriangleAlert, XCircle } from "lucide-react";
 
-import { ApiAction, ApiAlert, ApiMonitorTask, ApiOfficialWarningIncident, ApiRun } from "../lib/api";
+import { ApiAction, ApiAlert, ApiMonitorTask, ApiOfficialWarningIncident, ApiRun, approveAction, rejectAction } from "../lib/api";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
 export function EmergencyRequestPanel({
@@ -11,7 +13,8 @@ export function EmergencyRequestPanel({
   monitorTasks = [],
   run,
   className,
-  mode = "demo"
+  mode = "demo",
+  onActionsChange
 }: {
   actions?: ApiAction[];
   alerts?: ApiAlert[];
@@ -19,7 +22,11 @@ export function EmergencyRequestPanel({
   run?: ApiRun | null;
   className?: string;
   mode?: string;
+  onActionsChange?: (actions: ApiAction[] | ((current: ApiAction[]) => ApiAction[])) => void;
 }) {
+  const [expandedActionId, setExpandedActionId] = useState<string | null>(null);
+  const [busyActionId, setBusyActionId] = useState<string | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
   const pendingActions = actions.filter((action) => action.status === "pending_approval");
   const warningSource = run?.evidence?.official_warnings?.source ?? "Official warning feed";
   const warningSummary = run?.evidence?.official_warnings?.data?.summary;
@@ -124,7 +131,23 @@ export function EmergencyRequestPanel({
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pending approvals</div>
           {pendingActions.length ? (
             pendingActions.map((action) => (
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-3" key={action.action_id}>
+              <div
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50"
+                key={action.action_id}
+                onClick={() => {
+                  setDecisionError(null);
+                  setExpandedActionId((current) => (current === action.action_id ? null : action.action_id));
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setDecisionError(null);
+                    setExpandedActionId((current) => (current === action.action_id ? null : action.action_id));
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-[13px] font-medium leading-4 text-slate-800">
                     <ShieldAlert className="h-4 w-4 text-orange-600" />
@@ -133,6 +156,39 @@ export function EmergencyRequestPanel({
                   <Badge variant="elevated">pending</Badge>
                 </div>
                 <div className="mt-2 text-[11px] leading-4 text-slate-500">{action.action_type}</div>
+                {expandedActionId === action.action_id ? (
+                  <div className="mt-3 space-y-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                    <div className="text-xs leading-5 text-slate-600">{action.draft}</div>
+                    {decisionError ? <div className="text-xs text-red-700">{decisionError}</div> : null}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        disabled={busyActionId === action.action_id}
+                        size="sm"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleApproveAction(action);
+                        }}
+                      >
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Approve
+                      </Button>
+                      <Button
+                        disabled={busyActionId === action.action_id}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleRejectAction(action);
+                        }}
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ))
           ) : (
@@ -151,6 +207,149 @@ export function EmergencyRequestPanel({
       </CardContent>
     </Card>
   );
+
+  async function handleApproveAction(action: ApiAction) {
+    setBusyActionId(action.action_id);
+    setDecisionError(null);
+    try {
+      const result = await approveAction(action.action_id);
+      onActionsChange?.((current) => upsertAction(current, result.action));
+      await downloadApprovedAdvisoryAssets(result.action, run);
+      setExpandedActionId(null);
+    } catch (error) {
+      setDecisionError(error instanceof Error ? error.message : "Failed to approve action.");
+    } finally {
+      setBusyActionId(null);
+    }
+  }
+
+  async function handleRejectAction(action: ApiAction) {
+    setBusyActionId(action.action_id);
+    setDecisionError(null);
+    try {
+      const result = await rejectAction(action.action_id);
+      onActionsChange?.((current) => upsertAction(current, result.action));
+      setExpandedActionId(null);
+    } catch (error) {
+      setDecisionError(error instanceof Error ? error.message : "Failed to decline action.");
+    } finally {
+      setBusyActionId(null);
+    }
+  }
+}
+
+function upsertAction(actions: ApiAction[], action: ApiAction) {
+  const index = actions.findIndex((item) => item.action_id === action.action_id);
+  if (index === -1) {
+    return [action, ...actions];
+  }
+  const next = [...actions];
+  next[index] = action;
+  return next;
+}
+
+async function downloadApprovedAdvisoryAssets(action: ApiAction, run?: ApiRun | null) {
+  const postText = buildFacebookPost(action, run);
+  const text = [
+    action.title,
+    "",
+    "Approved public advisory draft:",
+    action.draft,
+    "",
+    "Facebook-ready post:",
+    postText,
+    "",
+    `Approval status: ${action.status}`,
+  ].join("\n");
+  downloadTextFile(`${safeFilename(action.title)}.txt`, text);
+  await downloadPosterPng(action, postText, run);
+}
+
+function buildFacebookPost(action: ApiAction, run?: ApiRun | null) {
+  const risk = run?.risk_level && run?.risk_score != null ? `${run.risk_level} (${run.risk_score}/100)` : "current wildfire conditions";
+  return `${action.draft}\n\nCurrent risk: ${risk}. Follow official emergency channels for updates.`;
+}
+
+function downloadTextFile(filename: string, text: string) {
+  const blob = new Blob([text], {type: "text/plain;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadPosterPng(action: ApiAction, postText: string, run?: ApiRun | null) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1080;
+  canvas.height = 1080;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return;
+  }
+  context.fillStyle = "#f8fafc";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#0f172a";
+  context.fillRect(0, 0, canvas.width, 150);
+  context.fillStyle = "#ffffff";
+  context.font = "700 42px Arial";
+  context.fillText("Approved Public Advisory", 60, 92);
+  context.fillStyle = "#ea580c";
+  context.fillRect(60, 195, 160, 42);
+  context.fillStyle = "#ffffff";
+  context.font = "700 24px Arial";
+  context.fillText("APPROVED", 82, 225);
+  context.fillStyle = "#0f172a";
+  context.font = "700 38px Arial";
+  wrapCanvasText(context, action.title, 60, 305, 950, 48, 2);
+  context.font = "400 30px Arial";
+  context.fillStyle = "#334155";
+  wrapCanvasText(context, postText, 60, 430, 950, 42, 9);
+  context.fillStyle = "#475569";
+  context.font = "700 28px Arial";
+  const risk = run?.risk_level && run?.risk_score != null ? `Risk: ${run.risk_level} ${run.risk_score}/100` : "Risk: latest approved advisory";
+  context.fillText(risk, 60, 980);
+  const url = canvas.toDataURL("image/png");
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${safeFilename(action.title)}-poster.png`;
+  anchor.click();
+}
+
+function wrapCanvasText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines: number
+) {
+  const words = text.split(/\s+/);
+  let line = "";
+  let lineCount = 0;
+  for (const word of words) {
+    const nextLine = line ? `${line} ${word}` : word;
+    if (context.measureText(nextLine).width > maxWidth && line) {
+      context.fillText(line, x, y);
+      y += lineHeight;
+      line = word;
+      lineCount += 1;
+      if (lineCount >= maxLines) {
+        return;
+      }
+    } else {
+      line = nextLine;
+    }
+  }
+  if (line && lineCount < maxLines) {
+    context.fillText(line, x, y);
+  }
+}
+
+function safeFilename(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "public-advisory";
 }
 
 function badgeForWarning(alertLevel: string) {

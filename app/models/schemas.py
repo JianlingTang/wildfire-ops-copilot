@@ -26,6 +26,7 @@ class DailyRunRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    conversation_id: str | None = None
     run_id: str | None = None
     region_id: str = "live_australia"
     region_name: str | None = None
@@ -62,6 +63,44 @@ class TraceEvent(BaseModel):
     status: str
     summary: str
     timestamp: datetime
+
+
+class AgentEventRecord(BaseModel):
+    event_id: str
+    trace_id: str
+    conversation_id: str | None = None
+    run_id: str | None = None
+    region_id: str | None = None
+    agent_type: str
+    status: Literal["started", "completed", "failed", "blocked"]
+    message: str
+    timestamp: datetime
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatMessageRecord(BaseModel):
+    message_id: str
+    conversation_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    intent: str | None = None
+    tool_trace: list[dict[str, Any]] = Field(default_factory=list)
+    tool_results: dict[str, Any] = Field(default_factory=dict)
+    run_id: str | None = None
+    region_id: str | None = None
+    created_at: datetime
+
+
+class ConversationRecord(BaseModel):
+    conversation_id: str
+    user_id: str
+    region_id: str
+    region_name: str | None = None
+    run_id: str | None = None
+    compressed_context: str = ""
+    created_at: datetime
+    updated_at: datetime
+    messages: list[ChatMessageRecord] = Field(default_factory=list)
 
 
 class AlertRecord(BaseModel):

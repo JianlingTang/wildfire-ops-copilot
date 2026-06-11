@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import actions, alerts, chat, hotspots, monitor_tasks, reports, runs
+from app.api import actions, agent_events, alerts, chat, hotspots, monitor_tasks, reports, runs
 from app.config.settings import settings
 from app.services.monitoring_tasks import start_monitor_loop
 
@@ -16,6 +16,7 @@ app.add_middleware(
 )
 
 app.include_router(runs.router, prefix="/api")
+app.include_router(agent_events.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(hotspots.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")

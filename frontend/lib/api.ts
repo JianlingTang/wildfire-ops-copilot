@@ -228,6 +228,14 @@ export type ApiHotspotVisualization = {
       };
     }[];
   };
+  preview?: {
+    format: string;
+    encoding: string;
+    data_url: string;
+    width: number;
+    height: number;
+    alt: string;
+  };
   interpretation: {
     summary: string;
     cluster_center: [number, number] | number[];
@@ -236,8 +244,11 @@ export type ApiHotspotVisualization = {
     caveat: string;
   };
   downloads: {
-    json_filename: string;
-    csv_filename: string;
+    txt_filename?: string;
+    txt_content?: string;
+    png_filename?: string;
+    json_filename?: string;
+    csv_filename?: string;
   };
 };
 
@@ -256,20 +267,86 @@ export type ApiMonitorTask = {
   created_at: string;
 };
 
+export type ApiRiskTrend = {
+  points: {
+    run_id?: string;
+    risk_score: number;
+    risk_level: string;
+    date: string;
+    type: "historical" | "current" | "forecast";
+  }[];
+  note: string;
+  region_name: string;
+  preview?: {
+    format: string;
+    encoding: string;
+    data_url: string;
+    alt: string;
+  };
+  downloads?: {
+    png_filename?: string;
+  };
+  prediction?: Record<string, any>;
+};
+
 export type ChatApiResult = {
   intent: string;
   mode?: string;
-  response?: Record<string, any>;
+  trace_id?: string;
+  timing_trace?: {
+    intent?: string;
+    total_ms?: number;
+    api_total_ms?: number;
+    steps?: {
+      name: string;
+      duration_ms: number;
+      status: string;
+      detail?: Record<string, any>;
+    }[];
+  };
+  client_timing?: Record<string, number>;
+  response?: Record<string, any> & {risk_trend?: ApiRiskTrend};
   run?: ApiRun;
   report?: ApiReport;
   alert?: ApiAlert | null;
+  conversation_id?: string;
+  messages?: ApiChatMessage[];
+  context_summary?: string;
+  requires_analysis?: boolean;
+};
+
+export type ApiAgentEvent = {
+  event_id: string;
+  trace_id: string;
+  conversation_id?: string | null;
+  run_id?: string | null;
+  region_id?: string | null;
+  agent_type: string;
+  status: "started" | "completed" | "failed" | "blocked";
+  message: string;
+  timestamp: string;
+  data: Record<string, any>;
 };
 
 export type ChatRequestOptions = {
+  conversationId?: string;
   runId?: string;
   regionId?: string;
   regionName?: string;
   aoi?: ApiAoi;
+};
+
+export type ApiChatMessage = {
+  message_id: string;
+  conversation_id: string;
+  role: "user" | "assistant";
+  content: string;
+  intent?: string | null;
+  tool_trace?: Record<string, any>[];
+  tool_results?: Record<string, any>;
+  run_id?: string | null;
+  region_id?: string | null;
+  created_at: string;
 };
 
 export async function startManualRun() {
@@ -288,7 +365,9 @@ export async function sendChat(
   message: string,
   options: ChatRequestOptions = {}
 ): Promise<ChatApiResult> {
+  const startedAt = nowMs();
   const {
+    conversationId,
     runId,
     regionId = "live_australia",
     regionName,
@@ -299,6 +378,7 @@ export async function sendChat(
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       message,
+      conversation_id: conversationId,
       run_id: runId,
       region_id: regionId,
       region_name: regionName,
@@ -308,7 +388,22 @@ export async function sendChat(
   if (!response.ok) {
     throw new Error("Chat request failed");
   }
-  return response.json();
+  const payload = await response.json();
+  return {
+    ...payload,
+    client_timing: {
+      ...(payload.client_timing ?? {}),
+      chat_api_fetch_ms: roundMs(nowMs() - startedAt)
+    }
+  };
+}
+
+function nowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function roundMs(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 export async function getHotspotOverview(): Promise<ApiHotspotOverview> {
@@ -336,6 +431,23 @@ export async function getRunEvents(runId: string): Promise<{events: ApiTraceEven
   return response.json();
 }
 
+export async function getRecentAgentEvents(limit = 20): Promise<{events: ApiAgentEvent[]}> {
+  const params = new URLSearchParams({limit: String(limit)});
+  const response = await fetch(`${API_BASE_URL}/api/agent-events/recent?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error("Failed to load agent activity");
+  }
+  return response.json();
+}
+
+export function getAgentEventsWebSocketUrl() {
+  const base = new URL(API_BASE_URL);
+  base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+  base.pathname = "/api/agent-events/ws";
+  base.search = "";
+  return base.toString();
+}
+
 export async function getAlerts(): Promise<{alerts: ApiAlert[]}> {
   const response = await fetch(`${API_BASE_URL}/api/alerts`);
   if (!response.ok) {
@@ -348,6 +460,30 @@ export async function getActions(): Promise<{actions: ApiAction[]; approvals: Ap
   const response = await fetch(`${API_BASE_URL}/api/actions`);
   if (!response.ok) {
     throw new Error("Failed to load actions");
+  }
+  return response.json();
+}
+
+export async function approveAction(actionId: string, actor = "demo_officer"): Promise<{action: ApiAction; approval: ApiApproval}> {
+  const response = await fetch(`${API_BASE_URL}/api/actions/${actionId}/approve`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({actor})
+  });
+  if (!response.ok) {
+    throw new Error("Failed to approve action");
+  }
+  return response.json();
+}
+
+export async function rejectAction(actionId: string, actor = "demo_officer"): Promise<{action: ApiAction; approval: ApiApproval}> {
+  const response = await fetch(`${API_BASE_URL}/api/actions/${actionId}/reject`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({actor})
+  });
+  if (!response.ok) {
+    throw new Error("Failed to decline action");
   }
   return response.json();
 }

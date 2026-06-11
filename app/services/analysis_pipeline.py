@@ -14,10 +14,7 @@ from app.tools.fire_hotspot_tools import get_fire_hotspots
 from app.tools.official_warning_tools import get_official_fire_warnings
 from app.tools.provider_utils import coerce_center, coerce_radius_km, external_data_mode
 from app.tools.risk_tools import compute_wildfire_risk_score
-from app.tools.spatial_tools import (
-    build_spatial_fallback_summary,
-    get_spatial_exposure_summary,
-)
+from app.tools.spatial_tools import get_spatial_exposure_summary
 from app.tools.weather_tools import get_weather_forecast
 
 _ANALYSIS_CACHE: dict[str, dict[str, Any]] = {}
@@ -124,11 +121,9 @@ def _collect_evidence(
             spatial = spatial_future.result(timeout=remaining)
         except FutureTimeout:
             spatial_soft_timeout = True
-            spatial = build_spatial_fallback_summary(
-                "Spatial exposure fallback used after soft timeout."
-            )
+            spatial = {"status": "error", "message": "Spatial exposure request exceeded the soft timeout."}
         except Exception as exc:  # pragma: no cover - defensive path
-            spatial = build_spatial_fallback_summary(f"Spatial exposure request failed: {exc}")
+            spatial = {"status": "error", "message": f"Spatial exposure request failed: {exc}"}
     finally:
         spatial_executor.shutdown(wait=False, cancel_futures=True)
 
@@ -140,7 +135,54 @@ def _collect_evidence(
         "spatial": spatial,
         "elastic": results["elastic"],
     }
+    evidence["risk_timeseries"] = _build_risk_timeseries(evidence)
     return evidence, hotspot_reused, spatial_soft_timeout
+
+
+def _build_risk_timeseries(evidence: dict[str, Any]) -> dict[str, Any]:
+    baseline = compute_wildfire_risk_score(evidence)
+    current_score = int(baseline["risk_score"])
+    today = datetime.now(UTC).date()
+    points = []
+    for offset in range(-5, 6):
+        adjustment = _timeseries_adjustment(offset, current_score)
+        score = min(100, max(0, current_score + adjustment))
+        point_type = "historical" if offset < 0 else "forecast" if offset > 0 else "current"
+        points.append(
+            {
+                "date": (today + timedelta(days=offset)).isoformat(),
+                "risk_score": score,
+                "risk_level": _risk_level_for_score(score),
+                "type": point_type,
+            }
+        )
+    return {
+        "source": "deterministic_risk_timeseries",
+        "window_days": 5,
+        "points": points,
+        "caveat": (
+            "Historical and forecast points are estimates from current AOI evidence for operational planning."
+        ),
+    }
+
+
+def _timeseries_adjustment(offset: int, current_score: int) -> int:
+    if offset == 0:
+        return 0
+    direction = 1 if current_score >= 70 else -1 if current_score <= 40 else 0
+    if offset < 0:
+        return -direction * min(10, abs(offset) * 2) - max(0, 5 - abs(offset))
+    return direction * max(0, 6 - offset) - max(0, offset - 2)
+
+
+def _risk_level_for_score(score: int) -> str:
+    if score >= 85:
+        return "EXTREME"
+    if score >= 65:
+        return "HIGH"
+    if score >= 35:
+        return "MODERATE"
+    return "LOW"
 
 
 def _analysis_cache_key(
@@ -179,11 +221,11 @@ def _analysis_cache_ttl_seconds() -> float:
 
 
 def _spatial_soft_timeout_seconds() -> float:
-    raw = os.getenv("ANALYSIS_SPATIAL_SOFT_TIMEOUT_SECONDS", "3").strip()
+    raw = os.getenv("ANALYSIS_SPATIAL_SOFT_TIMEOUT_SECONDS", "10").strip()
     try:
         return max(0.0, float(raw))
     except ValueError:
-        return 3.0
+        return 10.0
 
 
 def _get_cached_analysis(cache_key: str) -> dict[str, Any] | None:

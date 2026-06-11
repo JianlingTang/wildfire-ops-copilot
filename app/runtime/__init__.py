@@ -8,7 +8,7 @@ from app.runtime.mock_demo import MockDemoRuntime
 
 
 def get_runtime() -> AgentRuntime:
-    runtime_name = os.getenv("AGENT_RUNTIME", "mock_demo").lower()
-    if runtime_name == "adk":
-        return AdkRuntime()
-    return MockDemoRuntime()
+    runtime_name = os.getenv("AGENT_RUNTIME", "adk").lower()
+    if runtime_name == "mock_demo":
+        return MockDemoRuntime()
+    return AdkRuntime()

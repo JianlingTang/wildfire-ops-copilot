@@ -1,6 +1,6 @@
 "use client";
 
-import { ActivitySquare, FileSearch, FileText, Flame, ListTree, ShieldCheck } from "lucide-react";
+import { FileSearch, FileText, Flame, ListTree, ShieldCheck } from "lucide-react";
 
 import { ApiRun } from "../lib/api";
 import { cn } from "../lib/utils";
@@ -8,7 +8,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
-export type SupportSection = "trace" | "evidence" | "reports" | "analytics";
+export type SupportSection = "evidence" | "reports";
 
 const navItems: {
   key: SupportSection;
@@ -16,12 +16,6 @@ const navItems: {
   description: string;
   icon: typeof ListTree;
 }[] = [
-  {
-    key: "trace",
-    label: "Agent Trace",
-    description: "Execution steps and workflow status",
-    icon: ListTree
-  },
   {
     key: "evidence",
     label: "Evidence",
@@ -33,12 +27,6 @@ const navItems: {
     label: "Reports",
     description: "Saved operational briefs",
     icon: FileText
-  },
-  {
-    key: "analytics",
-    label: "Risk Trend",
-    description: "Primary wildfire pressure trend",
-    icon: ActivitySquare
   }
 ];
 
@@ -133,10 +121,14 @@ export function OperationsSidebar({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{item.label}</span>
-                    {count != null ? <Badge variant={isActive ? "outline" : "muted"}>{count}</Badge> : null}
+                    <span className={cn("truncate text-sm font-medium", isActive && "text-white")}>{item.label}</span>
+                    {count != null ? (
+                      <Badge className={isActive ? "border-white/40 bg-white/10 text-white" : undefined} variant={isActive ? "outline" : "muted"}>
+                        {count}
+                      </Badge>
+                    ) : null}
                   </div>
-                  <div className={cn("truncate text-xs text-slate-500", isActive && "text-slate-300")}>{item.description}</div>
+                  <div className={cn("truncate text-xs text-slate-500", isActive && "text-slate-200")}>{item.description}</div>
                 </div>
               </Button>
             );

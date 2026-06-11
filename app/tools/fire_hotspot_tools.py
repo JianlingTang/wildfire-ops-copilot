@@ -56,7 +56,7 @@ def get_fire_hotspots(aoi: Aoi | dict, time_window: str = "24h") -> dict:
     if validation["status"] == "error":
         return validation
     if external_data_mode() == "demo":
-        return _demo_hotspots(time_window)
+        return {"status": "error", "message": "Hotspot provider is configured for demo mode; live data is required."}
 
     errors: list[str] = []
     nasa_key = _nasa_firms_api_key()
@@ -71,7 +71,7 @@ def get_fire_hotspots(aoi: Aoi | dict, time_window: str = "24h") -> dict:
     except Exception as exc:
         errors.append(f"DEA Hotspots failed: {exc}")
 
-    return _demo_hotspots(time_window, message="; ".join(errors) or "No live hotspot provider succeeded.")
+    return {"status": "error", "message": "; ".join(errors) or "No live hotspot provider succeeded."}
 
 
 def get_australia_hotspots_overview() -> dict:
@@ -81,9 +81,7 @@ def get_australia_hotspots_overview() -> dict:
         return cached
 
     if external_data_mode() == "demo":
-        payload = _demo_australia_hotspot_overview()
-        _store_cached_australia_overview(payload, _demo_australia_hotspot_rows())
-        return payload
+        return {"status": "error", "message": "Hotspot provider is configured for demo mode; live data is required."}
 
     try:
         rows = _fetch_australia_hotspot_rows()
@@ -100,9 +98,7 @@ def get_australia_hotspots_overview() -> dict:
             stale["cached"] = True
             stale["message"] = f"Serving cached Australia hotspot overview after refresh failure: {exc}"
             return stale
-        payload = _demo_australia_hotspot_overview(message=f"Live hotspot overview failed: {exc}")
-        _store_cached_australia_overview(payload, _demo_australia_hotspot_rows())
-        return payload
+        return {"status": "error", "message": f"Live hotspot overview failed: {exc}"}
 
 
 def get_state_hotspot_focus(state: str, radius_km: int | float) -> dict:
@@ -112,7 +108,10 @@ def get_state_hotspot_focus(state: str, radius_km: int | float) -> dict:
     if radius_km <= 0:
         return {"status": "error", "message": "radius_km must be positive."}
 
-    rows, mode, source, cached = _get_or_load_australia_hotspot_rows()
+    try:
+        rows, mode, source, cached = _get_or_load_australia_hotspot_rows()
+    except Exception as exc:
+        return {"status": "error", "message": f"Live hotspot focus failed: {exc}"}
     now = datetime.now(UTC)
     active_rows = [
         row
@@ -185,12 +184,40 @@ def resolve_operational_region(
         }
 
     if external_data_mode() == "demo":
-        return _demo_live_region_selection()
+        return _error_operational_region(
+            region_id,
+            region_name,
+            aoi or Aoi(),
+            "Hotspot provider is configured for demo mode; live data is required.",
+        )
 
     try:
         return _select_live_hotspot_region()
     except Exception as exc:
-        return _demo_live_region_selection(message=f"Live hotspot region selection failed: {exc}")
+        return _error_operational_region(
+            region_id,
+            region_name,
+            aoi or Aoi(),
+            f"Live hotspot region selection failed: {exc}",
+        )
+
+
+def _error_operational_region(region_id: str, region_name: str, aoi: Aoi, message: str) -> dict[str, Any]:
+    center = aoi.center or (-33.71, 150.31)
+    return {
+        "region_id": region_id,
+        "region_name": region_name,
+        "aoi": aoi,
+        "hotspots": {"status": "error", "message": message, "data": {"hotspots": [], "count_24h": 0}},
+        "region_context": {
+            "selection_mode": "provider_error",
+            "region_id": region_id,
+            "region_name": region_name,
+            "center": list(center),
+            "radius_km": aoi.radius_km,
+            "provider_error": message,
+        },
+    }
 
 
 def _explicit_state_aoi_region(
@@ -200,18 +227,65 @@ def _explicit_state_aoi_region(
     aoi: Aoi,
 ) -> dict[str, Any]:
     center = aoi.center or STATE_FOCUS_DEFAULTS[state_code]
+    radius_km = float(aoi.radius_km)
+    selected_at = datetime.now(UTC).isoformat()
+    try:
+        rows, mode, source, cached = _get_or_load_australia_hotspot_rows()
+    except Exception as exc:
+        rows = []
+        mode = "error"
+        source = f"DEA Hotspots unavailable: {exc}"
+        cached = False
+
+    now = datetime.now(UTC)
+    active_rows = [
+        row
+        for row in rows
+        if isinstance(row.get("detected_at"), datetime)
+        and row["detected_at"] >= now - timedelta(hours=24)
+    ]
+    if not active_rows:
+        active_rows = rows
+    state_rows = [row for row in active_rows if _normalize_state_code(row.get("state")) == state_code]
+    focus_rows = [
+        row
+        for row in state_rows
+        if haversine_km(center[0], center[1], row["lat"], row["lon"]) <= radius_km
+    ]
+    sampled_rows = _sample_rows_for_map(focus_rows, FOCUS_MAP_HOTSPOT_LIMIT, cell_size=0.07)
+    hotspot_count_24h = len(focus_rows)
+    statewide_hotspot_count_24h = len(state_rows)
+    hotspot_payload = {
+        "status": "error" if mode == "error" else "success",
+        "mode": mode,
+        "source": source,
+        "cached": cached,
+        "data": {
+            "time_window": "24h",
+            "count_24h": hotspot_count_24h,
+            "count_7d": statewide_hotspot_count_24h,
+            "count_window_days": 1,
+            "hotspots": [_serialize_hotspot(row) for row in sampled_rows],
+        },
+    }
+    if mode == "error":
+        hotspot_payload["message"] = source
+
     return {
         "region_id": region_id,
         "region_name": region_name,
         "aoi": aoi,
-        "hotspots": None,
+        "hotspots": hotspot_payload,
         "region_context": {
             "selection_mode": "selected_aoi",
             "state": state_code,
             "region_id": region_id,
             "region_name": region_name,
             "center": list(center),
-            "radius_km": aoi.radius_km,
+            "radius_km": radius_km,
+            "selected_at": selected_at,
+            "hotspot_count_24h": hotspot_count_24h,
+            "statewide_hotspot_count_24h": statewide_hotspot_count_24h,
         },
     }
 
@@ -722,14 +796,7 @@ def _get_or_load_australia_hotspot_rows() -> tuple[list[dict[str, Any]], str, st
         )
 
     if external_data_mode() == "demo":
-        rows = _demo_australia_hotspot_rows()
-        payload = _build_australia_hotspot_overview(
-            rows,
-            mode="demo",
-            source="DEA Hotspots demo overview",
-        )
-        _store_cached_australia_overview(payload, rows)
-        return rows, "demo", "DEA Hotspots demo overview", False
+        raise RuntimeError("Hotspot provider is configured for demo mode; live data is required.")
 
     rows = _fetch_australia_hotspot_rows()
     payload = _build_australia_hotspot_overview(

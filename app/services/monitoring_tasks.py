@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -10,9 +11,12 @@ from app.services.firestore_store import store, utc_now
 from app.tools.fire_hotspot_tools import resolve_operational_region
 
 _MONITOR_LOOP_STARTED = False
+DEFAULT_MONITOR_INTERVAL_MINUTES = 10
+_INTERVAL_PATTERN = re.compile(r"\b(\d{1,4})\s*-?\s*(minutes?|mins?|hours?|hrs?)\b", re.IGNORECASE)
 
 
-def create_monitor_task_from_chat(request: ChatRequest, interval_minutes: int = 10) -> dict[str, Any]:
+def create_monitor_task_from_chat(request: ChatRequest, interval_minutes: int | None = None) -> dict[str, Any]:
+    resolved_interval_minutes = interval_minutes or _parse_interval_minutes(request.message) or DEFAULT_MONITOR_INTERVAL_MINUTES
     region = resolve_operational_region(
         request.region_id,
         request.region_name or request.region_id.replace("_", " ").title(),
@@ -24,8 +28,8 @@ def create_monitor_task_from_chat(request: ChatRequest, interval_minutes: int = 
             "region_id": region["region_id"],
             "region_name": region["region_name"],
             "aoi": region["aoi"],
-            "interval_minutes": interval_minutes,
-            "next_check_at": utc_now() + timedelta(minutes=interval_minutes),
+            "interval_minutes": resolved_interval_minutes,
+            "next_check_at": utc_now() + timedelta(minutes=resolved_interval_minutes),
             "created_by": request.user_id,
         }
     )
@@ -48,6 +52,17 @@ def create_monitor_task_from_chat(request: ChatRequest, interval_minutes: int = 
             _trace_item("Alert Rule", "Configured material-change alerting.", "score delta >= 12"),
         ],
     }
+
+
+def _parse_interval_minutes(message: str) -> int | None:
+    match = _INTERVAL_PATTERN.search(message)
+    if not match:
+        return None
+    value = int(match.group(1))
+    unit = match.group(2).lower()
+    if unit.startswith("hour") or unit.startswith("hr"):
+        return value * 60
+    return value
 
 
 def list_monitor_tasks() -> list[MonitorTaskRecord]:

@@ -7,14 +7,24 @@ def classify_intent(message: str) -> str:
         return "MONITOR_TASK"
     if _is_analyze_and_report(lowered):
         return "ANALYZE_AND_REPORT"
+    if _is_prediction_request(lowered):
+        return "RISK_PREDICTION"
+    if _is_risk_trend_request(lowered):
+        return "RISK_TREND"
     if "what if" in lowered:
         return "WHAT_IF"
     if any(term in lowered for term in ["draft", "email", "advisory", "brief", "call script", "task"]):
         return "ACTION_COMMAND"
     if "report" in lowered:
         return "REPORT_REQUEST"
+    if _is_wind_change_request(lowered):
+        return "WIND_CHANGE"
+    if _is_weather_change_request(lowered):
+        return "WEATHER_CHANGE"
     if "changed" in lowered or "since yesterday" in lowered:
         return "CHANGE_EXPLANATION"
+    if _is_exposure_lookup(lowered):
+        return "EXPOSURE_LOOKUP"
     if "why" in lowered or "evidence" in lowered:
         return "RISK_EXPLANATION"
     if "inspect" in lowered or "first" in lowered or "priority" in lowered:
@@ -43,6 +53,61 @@ def _is_monitor_task(lowered: str) -> bool:
     if "monitor" in lowered and any(term in lowered for term in ["every", "10 minute", "10-minute", "risk score"]):
         return True
     return "create" in lowered and "monitor" in lowered and "task" in lowered
+
+
+def _is_risk_trend_request(lowered: str) -> bool:
+    return "trend" in lowered and any(term in lowered for term in ["risk", "score", "pressure", "wildfire"])
+
+
+def _is_prediction_request(lowered: str) -> bool:
+    if "what if" in lowered:
+        return False
+    terms = [
+        "predict",
+        "prediction",
+        "forecast",
+        "next few days",
+        "tomorrow",
+        "future risk",
+        "will risk",
+        "预计",
+        "预测",
+        "未来",
+    ]
+    return any(term in lowered for term in terms)
+
+
+def _is_wind_change_request(lowered: str) -> bool:
+    return "wind" in lowered and any(term in lowered for term in ["changed", "change", "since yesterday", "yesterday"])
+
+
+def _is_weather_change_request(lowered: str) -> bool:
+    return "weather" in lowered and any(
+        term in lowered for term in ["changed", "change", "since yesterday", "yesterday"]
+    )
+
+
+def _is_exposure_lookup(lowered: str) -> bool:
+    exposure_terms = [
+        "exposed",
+        "exposure",
+        "asset",
+        "assets",
+        "critical asset",
+        "critical assets",
+        "road",
+        "roads",
+        "town",
+        "towns",
+        "settlement",
+        "settlements",
+        "protected area",
+        "protected areas",
+        "park",
+        "parks",
+    ]
+    lookup_terms = ["what", "which", "list", "show", "within", "inside", "near", "nearby", "aoi"]
+    return any(term in lowered for term in exposure_terms) and any(term in lowered for term in lookup_terms)
 
 
 def _is_analyze_and_report(lowered: str) -> bool:
