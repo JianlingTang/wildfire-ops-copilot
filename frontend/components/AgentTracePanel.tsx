@@ -64,7 +64,7 @@ export function AgentTracePanel({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Agent Plan &amp; Trace</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">{mode === "demo" ? "Demo Mode" : "Live"}</Badge>
+            <Badge variant="outline">{mode === "demo" ? "Operational" : "Live"}</Badge>
             <Badge variant="outline">{traceItems.filter((item) => item.status === "completed").length} completed</Badge>
           </div>
         </div>

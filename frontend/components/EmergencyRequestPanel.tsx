@@ -40,7 +40,7 @@ export function EmergencyRequestPanel({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Alerts &amp; approvals</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">{mode === "demo" ? "Demo Mode" : "Live"}</Badge>
+            <Badge variant="outline">{mode === "demo" ? "Operational" : "Live"}</Badge>
             <Badge variant="elevated">{totalItems} items</Badge>
           </div>
         </div>
@@ -201,7 +201,7 @@ export function EmergencyRequestPanel({
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-[11px] leading-4 text-slate-500">
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-slate-500" />
-            Official warnings come from the active run evidence. Alert and approval records remain routed through the demo agent workflow.
+            Official warnings come from the active run evidence. Alert and approval records remain routed through the agent workflow.
           </div>
         </div>
       </CardContent>

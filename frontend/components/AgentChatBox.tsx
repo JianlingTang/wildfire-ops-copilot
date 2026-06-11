@@ -12,7 +12,7 @@ const prompts = [
   "Analyze the most active hotspot region in Australia and generate today's report.",
   "Create a hotspot heatmap and contour visualization for this AOI.",
   "Create a monitor task for this state every 10 minutes.",
-  "What changed since yesterday?",
+  "Why is the current risk high?",
   "Show the risk trend for this AOI.",
   "What if wind increases by 20%?",
   "Which area should we inspect first?",
@@ -389,7 +389,7 @@ export function AgentChatBox({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Ask or command the agent</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">Demo Mode</Badge>
+            <Badge variant="outline">Operational</Badge>
             <Badge variant={intent === "action" ? "elevated" : intent === "analysis" ? "muted" : "outline"}>
               {intent === "action"
                 ? "Action"
@@ -418,7 +418,7 @@ export function AgentChatBox({
             aria-label="Agent command input"
             className="min-h-[112px] w-full resize-none rounded-lg border border-slate-200 bg-background px-3 py-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
             onChange={(event) => setMessage(event.target.value)}
-            placeholder="What changed since yesterday? What if wind increases by 20%? Which area should we inspect first? Draft a public advisory for this alert."
+            placeholder="Why is the current risk high? What if wind increases by 20%? Which area should we inspect first? Draft a public advisory for this alert."
             value={message}
           />
           <div className="flex items-center justify-between gap-3">
@@ -432,7 +432,7 @@ export function AgentChatBox({
                 <span className="inline-flex items-center gap-1">
                   <Play className="h-3.5 w-3.5 text-slate-500" />
                   {selectedRegion || activeRunId
-                    ? "Demo mode runs analysis against the focused AOI and records Elastic MCP evidence when available."
+                    ? "Analysis runs against the focused AOI and records Elastic MCP evidence when available."
                     : "Select a state and radius first. Analysis runs against the focused AOI."}
                 </span>
               ) : intent === "visualization" ? (

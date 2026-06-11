@@ -21,7 +21,7 @@ export function EvidencePanel({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Evidence Panel</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">{mode === "demo" ? "Demo Mode" : "Live"}</Badge>
+            <Badge variant="outline">{mode === "demo" ? "Operational" : "Live"}</Badge>
             <Badge variant="outline">{evidenceItems.length} sources</Badge>
           </div>
         </div>

@@ -14,7 +14,7 @@ export function ReportCenter({mode = "demo", reports = []}: {mode?: string; repo
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Report Center</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">{mode === "demo" ? "Demo Mode" : "Live"}</Badge>
+            <Badge variant="outline">{mode === "demo" ? "Operational" : "Live"}</Badge>
             <Badge variant="outline">PDF</Badge>
           </div>
         </div>

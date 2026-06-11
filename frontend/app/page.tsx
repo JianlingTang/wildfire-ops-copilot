@@ -421,7 +421,7 @@ export default function Home() {
           </div>
 
           <div className="hidden items-center gap-2 md:flex">
-            <Badge variant="outline">Demo Mode</Badge>
+            <Badge variant="outline">Operational</Badge>
             <Badge variant="muted">{focusDescriptor}</Badge>
             <Badge variant="elevated">{currentHotspotCount} hotspots</Badge>
             <Badge variant="outline">{warningCount} warnings</Badge>
@@ -537,7 +537,7 @@ export default function Home() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="muted">{focusDescriptor}</Badge>
-                    <Badge variant="outline">{mode === "demo" ? "Demo workflow" : "Live workflow"}</Badge>
+                    <Badge variant="outline">{mode === "demo" ? "Agent workflow" : "Live workflow"}</Badge>
                   </div>
                 </CardContent>
               </Card>
