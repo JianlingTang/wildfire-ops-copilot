@@ -21,6 +21,8 @@ def test_approve_action_validates_approval_and_writes_audit_log() -> None:
     assert response.json()["action"]["status"] == "approved"
     assert response.json()["approval"]["status"] == "approved"
     assert store.audit_logs[-1]["event_type"] == "ACTION_APPROVED"
+    assert store.agent_events[-1].agent_type == "approval"
+    assert store.agent_events[-1].message == "Public advisory action approved."
 
 
 def test_reject_action_marks_rejected_and_does_not_execute_action() -> None:
@@ -33,3 +35,5 @@ def test_reject_action_marks_rejected_and_does_not_execute_action() -> None:
     assert response.json()["action"]["status"] == "rejected"
     assert store.actions[action_id].status == "rejected"
     assert store.audit_logs[-1]["event_type"] == "ACTION_REJECTED"
+    assert store.agent_events[-1].agent_type == "approval"
+    assert store.agent_events[-1].message == "Public advisory action rejected."

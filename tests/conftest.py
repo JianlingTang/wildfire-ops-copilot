@@ -9,6 +9,7 @@ from app.services.firestore_store import store
 @pytest.fixture(autouse=True)
 def force_demo_external_data(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     monkeypatch.setenv("WILDFIRE_DATA_MODE", "demo")
+    monkeypatch.setenv("AGENT_RUNTIME", "mock_demo")
     yield
 
 

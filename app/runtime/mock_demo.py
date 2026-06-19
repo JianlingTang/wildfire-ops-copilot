@@ -10,9 +10,18 @@ from app.models.schemas import ChatRequest, ManualRunRequest, RunRecord
 from app.runtime.analysis import execute_analysis_request
 from app.runtime.base import AgentRuntime
 from app.runtime.intents import classify_intent
+from app.services.agent_events import new_trace_id, publish_agent_event
+from app.services.chat_conversations import (
+    analysis_required_response,
+    finalize_chat_response,
+    prepare_conversation,
+    should_block_for_analysis,
+)
 from app.services.firestore_store import store
 from app.services.hotspot_visualization import build_hotspot_visualization
+from app.services.mixed_intents import build_exposure_action_response, is_exposure_action_request
 from app.services.monitoring_tasks import create_monitor_task_from_chat
+from app.services.risk_trend import build_risk_prediction_response, build_risk_trend_response
 
 
 class MockDemoRuntime(AgentRuntime):
@@ -24,16 +33,72 @@ class MockDemoRuntime(AgentRuntime):
         return run_daily_intelligence(request, trigger_type="manual")
 
     def route_chat(self, request: ChatRequest) -> dict:
+        conversation, request = prepare_conversation(request)
+        trace_id = new_trace_id()
         intent = classify_intent(request.message)
+        _publish_chat_event(
+            trace_id, request, conversation.conversation_id, "started", "Coordinator received chat request.", intent
+        )
+        _publish_chat_event(
+            trace_id, request, conversation.conversation_id, "completed", f"Intent classified: {intent}.", intent
+        )
+        if should_block_for_analysis(intent, request, conversation):
+            _publish_chat_event(
+                trace_id,
+                request,
+                conversation.conversation_id,
+                "blocked",
+                "Analysis gate blocked request before workflow tool calls.",
+                intent,
+            )
+            return analysis_required_response(request, conversation, intent, mode="demo", trace_id=trace_id)
+        _publish_chat_event(
+            trace_id, request, conversation.conversation_id, "completed", "Analysis gate passed.", intent
+        )
+
         run = store.runs.get(request.run_id) if request.run_id else store.get_latest_run(request.region_id)
         if run is None and request.region_id == settings.demo_region_id:
             run = store.get_latest_run()
 
+        if is_exposure_action_request(request.message):
+            response = build_exposure_action_response(request, run, mode="demo")
+            response["trace_id"] = trace_id
+            _publish_artifact_event(
+                trace_id,
+                request,
+                conversation.conversation_id,
+                "approval",
+                "Approval requested for mixed exposure/action request.",
+                "EXPOSURE_ACTION",
+            )
+            return finalize_chat_response(request, conversation, response)
+
         if intent == "ANALYZE_AND_REPORT":
-            return self._analyze_and_report(request)
+            _publish_artifact_event(
+                trace_id, request, conversation.conversation_id, "analysis", "Analysis workflow started.", intent
+            )
+            response = self._analyze_and_report(request)
+            response["trace_id"] = trace_id
+            return finalize_chat_response(request, conversation, response)
+        if intent == "RISK_TREND":
+            payload = build_risk_trend_response(request, run, mode="demo")
+            _publish_artifact_event(
+                trace_id, request, conversation.conversation_id, "visualization", "Risk trend chart generated.", intent
+            )
+            return finalize_chat_response(
+                request, conversation, {"intent": intent, "mode": "demo", "response": payload, "trace_id": trace_id}
+            )
+        if intent == "RISK_PREDICTION":
+            payload = build_risk_prediction_response(request, run, mode="demo")
+            _publish_artifact_event(
+                trace_id, request, conversation.conversation_id, "risk", "Risk prediction generated.", intent
+            )
+            return finalize_chat_response(
+                request, conversation, {"intent": intent, "mode": "demo", "response": payload, "trace_id": trace_id}
+            )
         if intent == "HOTSPOT_VISUALIZATION":
             visualization = build_hotspot_visualization(request)
-            return {
+            response = {
                 "intent": intent,
                 "mode": "demo",
                 "response": {
@@ -56,33 +121,88 @@ class MockDemoRuntime(AgentRuntime):
                     ],
                 },
             }
+            _publish_artifact_event(
+                trace_id,
+                request,
+                conversation.conversation_id,
+                "visualization",
+                "Hotspot visualization artifact generated.",
+                intent,
+            )
+            response["trace_id"] = trace_id
+            return finalize_chat_response(request, conversation, response)
         if intent == "MONITOR_TASK":
             payload = create_monitor_task_from_chat(request)
             payload["mode"] = "demo"
-            return {"intent": intent, "mode": "demo", "response": payload}
+            _publish_artifact_event(
+                trace_id, request, conversation.conversation_id, "monitor", "Monitor task created.", intent
+            )
+            return finalize_chat_response(
+                request, conversation, {"intent": intent, "mode": "demo", "response": payload, "trace_id": trace_id}
+            )
         if intent == "WHAT_IF":
-            return {
+            payload = run_what_if(request.message, run, request.region_name, request.aoi)
+            payload.setdefault(
+                "tool_trace",
+                _tool_trace_for_demo_question("What-if Agent", payload.get("answer", "scenario complete")),
+            )
+            return finalize_chat_response(request, conversation, {
                 "intent": intent,
                 "mode": "demo",
-                "response": run_what_if(request.message, run, request.region_name, request.aoi),
-            }
+                "response": payload,
+                "trace_id": trace_id,
+            })
         if intent == "ACTION_COMMAND":
-            return {
+            payload = draft_action(request.message, run, request.user_id, request.region_name)
+            payload.setdefault(
+                "tool_trace",
+                _tool_trace_for_demo_question("Action Workflow", payload.get("safety_note", "draft created")),
+            )
+            _publish_artifact_event(
+                trace_id,
+                request,
+                conversation.conversation_id,
+                "approval",
+                "Approval requested for drafted action.",
+                intent,
+            )
+            return finalize_chat_response(request, conversation, {
                 "intent": intent,
                 "mode": "demo",
-                "response": draft_action(request.message, run, request.user_id, request.region_name),
-            }
+                "response": payload,
+                "trace_id": trace_id,
+            })
         if intent == "REPORT_REQUEST":
             result = create_report_for_run(run)
+            result.setdefault(
+                "tool_trace", _tool_trace_for_demo_question("Report Agent", result.get("status", "report request"))
+            )
             if result.get("status") == "success":
                 result["answer"] = "Generated a fresh operations brief from the latest completed run in demo mode."
-                return {"intent": intent, "mode": "demo", "response": result, "report": result["report"]}
-            return {"intent": intent, "mode": "demo", "response": result}
-        return {
+                return finalize_chat_response(
+                    request,
+                    conversation,
+                    {
+                        "intent": intent,
+                        "mode": "demo",
+                        "response": result,
+                        "report": result["report"],
+                        "trace_id": trace_id,
+                    },
+                )
+            return finalize_chat_response(
+                request, conversation, {"intent": intent, "mode": "demo", "response": result, "trace_id": trace_id}
+            )
+        payload = answer_operational_question(request.message, run, request.region_name, request.aoi)
+        payload.setdefault(
+            "tool_trace", _tool_trace_for_demo_question("Gemini Context Answer", payload.get("status", "success"))
+        )
+        return finalize_chat_response(request, conversation, {
             "intent": intent,
             "mode": "demo",
-            "response": answer_operational_question(request.message, run, request.region_name, request.aoi),
-        }
+            "response": payload,
+            "trace_id": trace_id,
+        })
 
     def _analyze_and_report(self, request: ChatRequest) -> dict:
         artifacts = execute_analysis_request(request, route_label="mock_demo_runtime")
@@ -108,6 +228,29 @@ class MockDemoRuntime(AgentRuntime):
                 "answer": answer,
                 "recommendations": artifacts.run.recommendations,
                 "evidence_source": "Elastic MCP demo evidence",
+                "tool_trace": [
+                    {
+                        "called": "Main Coordinator",
+                        "did": "Selected Analysis Workflow.",
+                        "output": artifacts.run.region_name,
+                        "mode": "demo",
+                        "status": "completed",
+                    },
+                    {
+                        "called": "External Data Tools",
+                        "did": "Called hotspot, weather, warning, and exposure tools.",
+                        "output": f"{artifacts.run.risk_level} {artifacts.run.risk_score}/100.",
+                        "mode": "demo",
+                        "status": "completed",
+                    },
+                    {
+                        "called": "Elastic MCP Tool",
+                        "did": "Queried operational evidence.",
+                        "output": "Elastic MCP demo evidence.",
+                        "mode": "demo",
+                        "status": "completed",
+                    },
+                ],
             },
             "run": artifacts.run,
             "report": artifacts.report,
@@ -128,4 +271,56 @@ def _operator_summary(run_record: RunRecord, report: dict, alert: dict | None) -
         "hotspot, weather, warning, and exposure inputs. "
         f"The top recommendation is to {run_record.recommendations[0].lower()} "
         f"{report['title']} was generated and saved to the dashboard. {alert_sentence}"
+    )
+
+
+def _tool_trace_for_demo_question(agent: str, output: str) -> list[dict]:
+    return [
+        {
+            "called": "Main Coordinator",
+            "did": f"Selected {agent}.",
+            "output": output,
+            "mode": "demo",
+            "status": "completed",
+        }
+    ]
+
+
+def _publish_chat_event(
+    trace_id: str,
+    request: ChatRequest,
+    conversation_id: str,
+    status: str,
+    message: str,
+    intent: str,
+) -> None:
+    publish_agent_event(
+        trace_id=trace_id,
+        conversation_id=conversation_id,
+        run_id=request.run_id,
+        region_id=request.region_id,
+        agent_type="coordinator",
+        status=status,
+        message=message,
+        data={"intent": intent, "mode": "demo"},
+    )
+
+
+def _publish_artifact_event(
+    trace_id: str,
+    request: ChatRequest,
+    conversation_id: str,
+    agent_type: str,
+    message: str,
+    intent: str,
+) -> None:
+    publish_agent_event(
+        trace_id=trace_id,
+        conversation_id=conversation_id,
+        run_id=request.run_id,
+        region_id=request.region_id,
+        agent_type=agent_type,
+        status="completed",
+        message=message,
+        data={"intent": intent, "mode": "demo"},
     )

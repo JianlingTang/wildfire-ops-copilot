@@ -1,4 +1,5 @@
 import time
+from datetime import UTC, datetime, timedelta
 
 from app.models.schemas import Aoi
 from app.services.analysis_pipeline import compute_analysis, reset_analysis_cache
@@ -61,7 +62,40 @@ def _elastic_payload() -> dict:
     }
 
 
-def test_state_focus_region_reuses_cached_hotspot_payload() -> None:
+def _live_nt_rows() -> tuple[list[dict], str, str, bool]:
+    now = datetime.now(UTC)
+    return (
+        [
+            {
+                "lat": -12.4513,
+                "lon": 132.9192,
+                "state": "NT",
+                "confidence": "high",
+                "detected_at": now - timedelta(minutes=20),
+                "power": 24.0,
+                "satellite": "HIMAWARI-9",
+                "sensor": "AHI",
+            },
+            {
+                "lat": -12.36,
+                "lon": 132.98,
+                "state": "NT",
+                "confidence": "nominal",
+                "detected_at": now - timedelta(minutes=40),
+                "power": 16.0,
+                "satellite": "HIMAWARI-9",
+                "sensor": "AHI",
+            },
+        ],
+        "live",
+        "test live hotspots",
+        False,
+    )
+
+
+def test_state_focus_region_reuses_cached_hotspot_payload(monkeypatch) -> None:
+    monkeypatch.setattr("app.tools.fire_hotspot_tools._get_or_load_australia_hotspot_rows", _live_nt_rows)
+
     result = resolve_operational_region(
         "state_nt",
         "Northern Territory hotspot focus",
@@ -75,6 +109,7 @@ def test_state_focus_region_reuses_cached_hotspot_payload() -> None:
 
 def test_compute_analysis_reuses_cached_inputs_for_same_aoi(monkeypatch) -> None:
     reset_analysis_cache()
+    monkeypatch.setattr("app.tools.fire_hotspot_tools._get_or_load_australia_hotspot_rows", _live_nt_rows)
     region = resolve_operational_region(
         "state_nt",
         "Northern Territory hotspot focus",

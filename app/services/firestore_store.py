@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from app.models.schemas import (
     ActionRecord,
+    AgentEventRecord,
     AlertRecord,
     ApprovalRecord,
+    ChatMessageRecord,
+    ConversationRecord,
     MonitorTaskRecord,
     ReportRecord,
     RunRecord,
@@ -33,6 +36,8 @@ class InMemoryStore:
         self.approvals: dict[str, ApprovalRecord] = {}
         self.reports: dict[str, ReportRecord] = {}
         self.monitor_tasks: dict[str, MonitorTaskRecord] = {}
+        self.conversations: dict[str, ConversationRecord] = {}
+        self.agent_events: list[AgentEventRecord] = []
         self.audit_logs: list[dict[str, Any]] = []
 
     def create_run(self, region_id: str, region_name: str) -> RunRecord:
@@ -77,6 +82,92 @@ class InMemoryStore:
         if not completed:
             return None
         return max(completed, key=lambda run: run.completed_at or run.created_at)
+
+    def get_or_create_conversation(
+        self,
+        *,
+        conversation_id: str | None,
+        user_id: str,
+        region_id: str,
+        region_name: str | None = None,
+        run_id: str | None = None,
+    ) -> ConversationRecord:
+        if conversation_id and conversation_id in self.conversations:
+            conversation = self.conversations[conversation_id]
+            updates: dict[str, Any] = {"updated_at": utc_now()}
+            if run_id:
+                updates["run_id"] = run_id
+            if region_name:
+                updates["region_name"] = region_name
+            conversation = conversation.model_copy(update=updates)
+            self.conversations[conversation.conversation_id] = conversation
+            return conversation
+
+        conversation = ConversationRecord(
+            conversation_id=conversation_id or f"conv_{uuid4().hex[:10]}",
+            user_id=user_id,
+            region_id=region_id,
+            region_name=region_name,
+            run_id=run_id,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        self.conversations[conversation.conversation_id] = conversation
+        return conversation
+
+    def append_chat_message(
+        self,
+        conversation_id: str,
+        *,
+        role: Literal["user", "assistant"],
+        content: str,
+        intent: str | None = None,
+        tool_trace: list[dict[str, Any]] | None = None,
+        tool_results: dict[str, Any] | None = None,
+        run_id: str | None = None,
+        region_id: str | None = None,
+    ) -> ChatMessageRecord:
+        conversation = self.conversations[conversation_id]
+        message = ChatMessageRecord(
+            message_id=f"msg_{uuid4().hex[:10]}",
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            intent=intent,
+            tool_trace=tool_trace or [],
+            tool_results=tool_results or {},
+            run_id=run_id,
+            region_id=region_id or conversation.region_id,
+            created_at=utc_now(),
+        )
+        messages = [*conversation.messages, message]
+        conversation = conversation.model_copy(update={"messages": messages, "updated_at": utc_now()})
+        self.conversations[conversation_id] = conversation
+        return message
+
+    def update_conversation_context(
+        self,
+        conversation_id: str,
+        *,
+        compressed_context: str | None = None,
+        run_id: str | None = None,
+        region_name: str | None = None,
+    ) -> ConversationRecord:
+        conversation = self.conversations[conversation_id]
+        updates: dict[str, Any] = {"updated_at": utc_now()}
+        if compressed_context is not None:
+            updates["compressed_context"] = compressed_context
+        if run_id:
+            updates["run_id"] = run_id
+        if region_name:
+            updates["region_name"] = region_name
+        conversation = conversation.model_copy(update=updates)
+        self.conversations[conversation_id] = conversation
+        return conversation
+
+    def get_recent_chat_messages(self, conversation_id: str, limit: int = 6) -> list[ChatMessageRecord]:
+        conversation = self.conversations[conversation_id]
+        return conversation.messages[-limit:]
 
     def add_event(self, run_id: str, agent: str, step: str, status: str, summary: str) -> TraceEvent:
         event = TraceEvent(
@@ -171,6 +262,34 @@ class InMemoryStore:
         }
         self.audit_logs.append(record)
         return record
+
+    def append_agent_event(
+        self,
+        *,
+        trace_id: str,
+        agent_type: str,
+        status: str,
+        message: str,
+        conversation_id: str | None = None,
+        run_id: str | None = None,
+        region_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> AgentEventRecord:
+        event = AgentEventRecord(
+            event_id=f"evt_{uuid4().hex[:10]}",
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            region_id=region_id,
+            agent_type=agent_type,
+            status=status,  # type: ignore[arg-type]
+            message=message,
+            timestamp=utc_now(),
+            data=data or {},
+        )
+        self.agent_events.append(event)
+        self.agent_events = self.agent_events[-200:]
+        return event
 
 
 store = InMemoryStore()

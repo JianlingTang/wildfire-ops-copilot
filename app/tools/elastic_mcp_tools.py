@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-DEFAULT_ELASTIC_MCP_TOOL_NAME = "search_wildfire_ops_knowledge"
+DEFAULT_ELASTIC_MCP_TOOL_NAME = "platform_core_search"
 
 
 class ElasticEvidenceProvider(ABC):
@@ -54,6 +54,20 @@ class MockElasticEvidenceProvider(ElasticEvidenceProvider):
         }
 
 
+class ErrorElasticEvidenceProvider(ElasticEvidenceProvider):
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def query(
+        self,
+        query: str,
+        region_name: str | None = None,
+        time_window: str | None = None,
+        evidence_type: str | None = None,
+    ) -> dict:
+        return _error_payload(query, _filters(region_name, time_window, evidence_type), self.message)
+
+
 class RealElasticMcpProvider(ElasticEvidenceProvider):
     def __init__(
         self,
@@ -68,7 +82,7 @@ class RealElasticMcpProvider(ElasticEvidenceProvider):
         self.kibana_url = configured_kibana_url.rstrip("/")
         self.api_key = api_key or os.getenv("ELASTIC_API_KEY", "")
         self.mcp_url = mcp_url or os.getenv("ELASTIC_MCP_URL") or _mcp_url_from_kibana(self.kibana_url)
-        self.tool_name = tool_name or os.getenv("ELASTIC_MCP_TOOL_NAME", DEFAULT_ELASTIC_MCP_TOOL_NAME)
+        self.tool_name = tool_name or os.getenv("ELASTIC_MCP_TOOL_NAME") or DEFAULT_ELASTIC_MCP_TOOL_NAME
         self.timeout_seconds = timeout_seconds or _elastic_timeout_seconds()
 
     def query(
@@ -80,21 +94,13 @@ class RealElasticMcpProvider(ElasticEvidenceProvider):
     ) -> dict:
         filters = _filters(region_name, time_window, evidence_type)
         if not self.mcp_url or not self.api_key:
-            return _fallback_payload(
-                query,
-                filters,
-                "Elastic MCP credentials are not configured; using deterministic fallback evidence.",
-            )
+            return _error_payload(query, filters, "Elastic MCP credentials are not configured.")
 
         try:
             payload = self._call_mcp_tool(query, region_name, time_window, evidence_type)
             evidence = _normalize_mcp_evidence(payload, region_name, evidence_type)
             if not evidence:
-                return _fallback_payload(
-                    query,
-                    filters,
-                    "Elastic MCP returned no usable evidence; using deterministic fallback evidence.",
-                )
+                return _error_payload(query, filters, "Elastic MCP returned no usable evidence.")
             return {
                 "status": "success",
                 "mode": "live",
@@ -105,11 +111,7 @@ class RealElasticMcpProvider(ElasticEvidenceProvider):
                 "evidence": evidence,
             }
         except Exception as exc:
-            return _fallback_payload(
-                query,
-                filters,
-                f"Elastic MCP request failed: {exc}. Using deterministic fallback evidence.",
-            )
+            return _error_payload(query, filters, f"Elastic MCP request failed: {exc}.")
 
     def _call_mcp_tool(
         self,
@@ -123,13 +125,7 @@ class RealElasticMcpProvider(ElasticEvidenceProvider):
             "Accept": "application/json, text/event-stream",
             "Content-Type": "application/json",
         }
-        arguments = {
-            os.getenv("ELASTIC_MCP_QUERY_ARGUMENT", "query"): query,
-            "region_name": region_name,
-            "time_window": time_window,
-            "evidence_type": evidence_type,
-        }
-        arguments = {key: value for key, value in arguments.items() if value is not None}
+        arguments = _mcp_tool_arguments(self.tool_name, query, region_name, time_window, evidence_type)
         with httpx.Client(timeout=self.timeout_seconds) as client:
             initialize = _mcp_request(
                 1,
@@ -168,6 +164,48 @@ def _mcp_url_from_kibana(kibana_url: str) -> str:
     if not kibana_url:
         return ""
     return f"{kibana_url}/api/agent_builder/mcp"
+
+
+def _mcp_tool_arguments(
+    tool_name: str,
+    query: str,
+    region_name: str | None,
+    time_window: str | None,
+    evidence_type: str | None,
+) -> dict:
+    if tool_name == "platform_core_search":
+        context = []
+        if region_name:
+            context.append(f"region: {region_name}")
+        if evidence_type:
+            context.append(f"evidence type: {evidence_type}")
+        enriched_query = f"{query} ({'; '.join(context)})" if context else query
+        arguments: dict[str, Any] = {"query": enriched_query}
+        time_range = _time_range_from_window(time_window)
+        if time_range:
+            arguments["time_range"] = time_range
+        index = os.getenv("ELASTIC_MCP_INDEX", "").strip()
+        if index:
+            arguments["index"] = index
+        return arguments
+
+    arguments = {
+        os.getenv("ELASTIC_MCP_QUERY_ARGUMENT", "query"): query,
+        "region_name": region_name,
+        "time_window": time_window,
+        "evidence_type": evidence_type,
+    }
+    return {key: value for key, value in arguments.items() if value is not None}
+
+
+def _time_range_from_window(time_window: str | None) -> dict | None:
+    if not time_window:
+        return None
+    window = time_window.strip()
+    if not window:
+        return None
+    start = window if window.startswith("now-") else f"now-{window}"
+    return {"from": start, "to": "now"}
 
 
 def _elastic_timeout_seconds() -> float:
@@ -221,6 +259,12 @@ def _normalize_mcp_evidence(payload: Any, region_name: str | None, evidence_type
         if not isinstance(raw_source, dict):
             continue
         source: dict[str, Any] = raw_source
+        raw_reference = source.get("reference")
+        reference: dict[str, Any] = raw_reference if isinstance(raw_reference, dict) else {}
+        raw_content = source.get("content")
+        content: dict[str, Any] = raw_content if isinstance(raw_content, dict) else {}
+        raw_snippets = content.get("snippets")
+        snippets: list[Any] = raw_snippets if isinstance(raw_snippets, list) else []
         evidence.append(
             {
                 "evidence_id": str(
@@ -228,12 +272,20 @@ def _normalize_mcp_evidence(payload: Any, region_name: str | None, evidence_type
                     or source.get("doc_id")
                     or source.get("_id")
                     or source.get("id")
+                    or reference.get("id")
                     or f"elastic_mcp_{index:03d}"
                 ),
                 "source": "Elastic Agent Builder MCP",
                 "type": str(source.get("type") or source.get("doc_type") or evidence_type or "operational_evidence"),
-                "title": str(source.get("title") or source.get("name") or "Elastic MCP evidence"),
-                "summary": str(source.get("summary") or source.get("content") or source.get("text") or ""),
+                "title": str(
+                    source.get("title") or source.get("name") or reference.get("id") or "Elastic MCP evidence"
+                ),
+                "summary": str(
+                    source.get("summary")
+                    or source.get("text")
+                    or "\n".join(str(snippet) for snippet in snippets)
+                    or ""
+                ),
                 "timestamp": str(
                     source.get("timestamp") or source.get("effective_date") or source.get("date") or "live"
                 ),
@@ -250,6 +302,10 @@ def _extract_candidate_documents(payload: Any) -> list[Any]:
         return payload
     if not isinstance(payload, dict):
         return [payload] if payload else []
+    if payload.get("type") == "resource_list":
+        resources = payload.get("data", {}).get("resources")
+        if isinstance(resources, list):
+            return resources
     if "error" in payload:
         raise RuntimeError(payload["error"])
     result = payload.get("result", payload)
@@ -266,7 +322,11 @@ def _extract_candidate_documents(payload: Any) -> list[Any]:
                 return docs
         for key in ("evidence", "documents", "docs", "results", "items", "data"):
             if isinstance(result.get(key), list):
-                return result[key]
+                nested_docs: list[Any] = []
+                for item in result[key]:
+                    nested = _extract_candidate_documents(item)
+                    nested_docs.extend(nested if nested != [item] else [item])
+                return nested_docs
             if isinstance(result.get(key), dict):
                 nested = _extract_candidate_documents(result[key])
                 if nested:
@@ -327,11 +387,23 @@ def _fallback_payload(query: str, filters: dict, message: str) -> dict:
     return fallback
 
 
+def _error_payload(query: str, filters: dict, message: str) -> dict:
+    return {
+        "status": "error",
+        "mode": "error",
+        "source": "Elastic Agent Builder MCP",
+        "query": query,
+        "filters": filters,
+        "evidence": [],
+        "message": message,
+    }
+
+
 def get_elastic_evidence_provider() -> ElasticEvidenceProvider:
-    provider_name = os.getenv("ELASTIC_EVIDENCE_PROVIDER", "mock").lower()
+    provider_name = os.getenv("ELASTIC_EVIDENCE_PROVIDER", "real").lower()
     if provider_name == "real":
         return RealElasticMcpProvider()
-    return MockElasticEvidenceProvider()
+    return ErrorElasticEvidenceProvider(f"Elastic provider '{provider_name}' is disabled; live MCP is required.")
 
 
 def query_elastic_evidence(

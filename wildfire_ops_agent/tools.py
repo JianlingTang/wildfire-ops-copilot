@@ -133,6 +133,7 @@ def action_command_tool(
     radius_km: float | None = None,
     run_id: str | None = None,
     user_id: str | None = None,
+    custom_draft: str | None = None,
 ) -> dict[str, Any]:
     """Action Workflow: draft operator action text and create a pending human approval record."""
     run = _resolve_run(tool_context)
@@ -147,7 +148,7 @@ def action_command_tool(
         user_id=user_id,
     )
     requested_by = request.user_id or str(tool_context.state.get("app:user_id", "demo_officer"))
-    payload = draft_action(user_request, run, requested_by, request.region_name)
+    payload = draft_action(user_request, run, requested_by, request.region_name, custom_draft=custom_draft)
     payload["mode"] = "adk"
     action = payload.get("action") or {}
     payload["tool_trace"] = _action_tool_trace(payload)

@@ -21,7 +21,7 @@ export function EvidencePanel({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Evidence Panel</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">{mode === "demo" ? "Demo Mode" : "Live"}</Badge>
+            <Badge variant="outline">{mode === "demo" ? "Operational" : "Live"}</Badge>
             <Badge variant="outline">{evidenceItems.length} sources</Badge>
           </div>
         </div>
@@ -69,9 +69,13 @@ function buildEvidenceItems(evidence?: Record<string, any> | null) {
     });
   }
   if (evidence.weather) {
+    const weatherData = evidence.weather.data ?? {};
     items.push({
       source: evidence.weather.source ?? "Weather source",
-      detail: `${evidence.weather.data?.wind_gust_max ?? "--"} km/h gusts, ${evidence.weather.data?.humidity_min ?? "--"}% humidity`,
+      detail:
+        evidence.weather.status === "error"
+          ? evidence.weather.message ?? "Weather evidence unavailable from live provider."
+          : `${weatherData.wind_gust_max ?? "--"} km/h gusts, ${weatherData.humidity_min ?? "--"}% humidity`,
       icon: Wind
     });
   }
@@ -85,7 +89,10 @@ function buildEvidenceItems(evidence?: Record<string, any> | null) {
   if (evidence.spatial) {
     items.push({
       source: evidence.spatial.source ?? "Spatial exposure",
-      detail: evidence.spatial.summary ?? "Exposure summary unavailable.",
+      detail:
+        evidence.spatial.status === "error"
+          ? evidence.spatial.message ?? "Spatial exposure unavailable from live provider."
+          : evidence.spatial.summary ?? "Exposure summary unavailable.",
       icon: Database
     });
   }

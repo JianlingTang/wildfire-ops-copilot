@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Flame, TriangleAlert, X } from "lucide-react";
+import { Activity, CheckCircle2, CircleDashed, Clock3, Flame, TriangleAlert, X, XCircle } from "lucide-react";
 
 import { AgentChatBox } from "../components/AgentChatBox";
-import { AgentTracePanel } from "../components/AgentTracePanel";
-import { AnalyticsPanel } from "../components/AnalyticsPanel";
 import { AoiSelectionToolbar } from "../components/AoiSelectionToolbar";
 import { EvidencePanel } from "../components/EvidencePanel";
 import { EmergencyRequestPanel } from "../components/EmergencyRequestPanel";
@@ -15,9 +13,9 @@ import { OperationsSidebar, SupportSection } from "../components/OperationsSideb
 import { ReportCenter } from "../components/ReportCenter";
 import { Badge } from "../components/ui/badge";
 import { Card, CardContent } from "../components/ui/card";
-import { ScrollArea } from "../components/ui/scroll-area";
 import {
   ApiAction,
+  ApiAgentEvent,
   ApiAlert,
   ApiHotspotFocus,
   ApiHotspotOverview,
@@ -25,14 +23,14 @@ import {
   ApiMonitorTask,
   ApiReport,
   ApiRun,
-  ApiTraceEvent,
   ChatApiResult,
+  getAgentEventsWebSocketUrl,
   getActions,
   getAlerts,
   getHotspotFocus,
   getHotspotOverview,
   getMonitorTasks,
-  getRunEvents
+  getRecentAgentEvents
 } from "../lib/api";
 
 type FocusSelection = {
@@ -65,11 +63,6 @@ const supportMeta: Record<
     description: string;
   }
 > = {
-  trace: {
-    eyebrow: "Support panel",
-    title: "Agent Trace",
-    description: "Inspect what the workflow called, what it did, and what it returned."
-  },
   evidence: {
     eyebrow: "Support panel",
     title: "Evidence Sources",
@@ -79,11 +72,6 @@ const supportMeta: Record<
     eyebrow: "Support panel",
     title: "Reports",
     description: "Open the saved operational briefs generated from the active analysis."
-  },
-  analytics: {
-    eyebrow: "Support panel",
-    title: "Risk Trend",
-    description: "Keep the primary wildfire pressure trend available without crowding the main console."
   }
 };
 
@@ -93,9 +81,8 @@ export default function Home() {
   const queueRef = useRef<HTMLDivElement | null>(null);
   const supportRef = useRef<HTMLDivElement | null>(null);
 
-  const [activeSupport, setActiveSupport] = useState<SupportSection>("trace");
+  const [activeSupport, setActiveSupport] = useState<SupportSection>("evidence");
   const [activeRun, setActiveRun] = useState<ApiRun | null>(null);
-  const [traceEvents, setTraceEvents] = useState<ApiTraceEvent[]>([]);
   const [reports, setReports] = useState<ApiReport[]>([]);
   const [alerts, setAlerts] = useState<ApiAlert[]>([]);
   const [actions, setActions] = useState<ApiAction[]>([]);
@@ -109,6 +96,7 @@ export default function Home() {
   const [draftState, setDraftState] = useState("");
   const [draftRadiusKm, setDraftRadiusKm] = useState(50);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [agentEvents, setAgentEvents] = useState<ApiAgentEvent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,6 +132,57 @@ export default function Home() {
     void loadOverview();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let socket: WebSocket | null = null;
+    let pollTimer: number | null = null;
+
+    async function loadRecent() {
+      try {
+        const payload = await getRecentAgentEvents(20);
+        if (!cancelled) {
+          setAgentEvents(payload.events);
+        }
+      } catch {
+        // Activity stream is observability-only; do not interrupt the operations console.
+      }
+    }
+
+    void loadRecent();
+
+    try {
+      socket = new WebSocket(getAgentEventsWebSocketUrl());
+      socket.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data) as ApiAgentEvent;
+          setAgentEvents((current) => upsertEvent([...current, parsed]).slice(-20));
+        } catch {
+          // Ignore malformed observability events.
+        }
+      };
+      socket.onerror = () => {
+        if (!pollTimer) {
+          pollTimer = window.setInterval(loadRecent, 2500);
+        }
+      };
+      socket.onclose = () => {
+        if (!cancelled && !pollTimer) {
+          pollTimer = window.setInterval(loadRecent, 2500);
+        }
+      };
+    } catch {
+      pollTimer = window.setInterval(loadRecent, 2500);
+    }
+
+    return () => {
+      cancelled = true;
+      socket?.close();
+      if (pollTimer) {
+        window.clearInterval(pollTimer);
+      }
     };
   }, []);
 
@@ -205,7 +244,6 @@ export default function Home() {
 
   const clearOperationalState = useCallback(() => {
     setActiveRun(null);
-    setTraceEvents([]);
     setReports([]);
     setAlerts([]);
     setActions([]);
@@ -230,21 +268,6 @@ export default function Home() {
     setLatestAnswer("Select a state and radius, then click Focus AOI before asking the agent.");
   }, []);
 
-  const scrollToSection = useCallback(
-    (section: "alerts" | "approvals" | "evidence" | "trace") => {
-      if (section === "trace") {
-        openSupport("trace");
-        return;
-      }
-      if (section === "evidence") {
-        openSupport("evidence");
-        return;
-      }
-      openQueue();
-    },
-    [openQueue, openSupport]
-  );
-
   const handleChatResult = useCallback((result: ChatApiResult) => {
     const answer = result.response?.answer ?? result.response?.safety_note ?? result.response?.message;
     if (answer) {
@@ -253,15 +276,6 @@ export default function Home() {
 
     if (result.run) {
       setActiveRun(result.run);
-      const runId = result.run.run_id;
-      void (async () => {
-        try {
-          const eventsResponse = await getRunEvents(runId);
-          setTraceEvents(eventsResponse.events);
-        } catch (error) {
-          console.error("Failed to refresh run events", error);
-        }
-      })();
     }
 
     if (result.report) {
@@ -276,7 +290,6 @@ export default function Home() {
 
     if (result.response?.visualization) {
       setVisualization(result.response.visualization as ApiHotspotVisualization);
-      openSupport("trace");
     }
 
     if (result.response?.monitor_task) {
@@ -288,23 +301,32 @@ export default function Home() {
 
     if (result.intent === "ANALYZE_AND_REPORT" || result.intent === "ACTION_COMMAND" || result.intent === "MONITOR_TASK") {
       void (async () => {
+        const refreshStartedAt = nowMs();
         try {
           const [alertsResponse, actionsResponse, monitorResponse] = await Promise.all([
-            getAlerts(),
-            getActions(),
-            getMonitorTasks()
+            timedClientCall("refresh_alerts", getAlerts),
+            timedClientCall("refresh_actions", getActions),
+            timedClientCall("refresh_monitor_tasks", getMonitorTasks)
           ]);
           setAlerts((current) => mergeById<ApiAlert, "alert_id">(current, alertsResponse.alerts, "alert_id"));
           setActions((current) => mergeById<ApiAction, "action_id">(current, actionsResponse.actions, "action_id"));
           setMonitorTasks((current) =>
             mergeById<ApiMonitorTask, "task_id">(current, monitorResponse.monitor_tasks, "task_id")
           );
+          console.info("[chat timing] frontend refresh", {
+            trace_id: result.trace_id,
+            intent: result.intent,
+            total_ms: roundMs(nowMs() - refreshStartedAt),
+            chat_api_fetch_ms: result.client_timing?.chat_api_fetch_ms,
+            backend_total_ms: result.timing_trace?.total_ms,
+            backend_api_total_ms: result.timing_trace?.api_total_ms
+          });
         } catch (error) {
           console.error("Failed to refresh alerts or actions", error);
         }
       })();
     }
-  }, [openQueue, openSupport]);
+  }, [openQueue]);
 
   const handleApplyFocus = useCallback(() => {
     if (!draftStateSummary || focusLoading) {
@@ -360,6 +382,10 @@ export default function Home() {
         </div>
       ) : null}
 
+      {overviewLoading && !overview ? (
+        <LoadingHotspotsScreen />
+      ) : (
+        <>
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-background/95 backdrop-blur">
         <div className="flex h-16 items-center justify-between gap-4 px-4 lg:px-6">
           <div className="flex items-center gap-3">
@@ -395,7 +421,7 @@ export default function Home() {
           </div>
 
           <div className="hidden items-center gap-2 md:flex">
-            <Badge variant="outline">Demo Mode</Badge>
+            <Badge variant="outline">Operational</Badge>
             <Badge variant="muted">{focusDescriptor}</Badge>
             <Badge variant="elevated">{currentHotspotCount} hotspots</Badge>
             <Badge variant="outline">{warningCount} warnings</Badge>
@@ -473,7 +499,6 @@ export default function Home() {
                 externalAnswer={latestAnswer}
                 onNeedAoiFocus={requestAoiFocus}
                 onResult={handleChatResult}
-                onShowTrace={() => openSupport("trace")}
                 selectedRegion={
                   !focusedSelection
                     ? null
@@ -488,13 +513,15 @@ export default function Home() {
                 }
               />
 
-              <div ref={queueRef}>
+              <div className="grid gap-4" ref={queueRef}>
+                <LiveAgentActivity events={agentEvents} />
                 <EmergencyRequestPanel
                   actions={actions}
                   alerts={alerts}
                   className="h-full"
                   mode={mode}
                   monitorTasks={monitorTasks}
+                  onActionsChange={setActions}
                   run={activeRun}
                 />
               </div>
@@ -510,20 +537,104 @@ export default function Home() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="muted">{focusDescriptor}</Badge>
-                    <Badge variant="outline">{mode === "demo" ? "Demo workflow" : "Live workflow"}</Badge>
+                    <Badge variant="outline">{mode === "demo" ? "Agent workflow" : "Live workflow"}</Badge>
                   </div>
                 </CardContent>
               </Card>
 
-              {activeSupport === "trace" ? <AgentTracePanel className="min-h-[320px]" events={traceEvents} mode={mode} /> : null}
               {activeSupport === "evidence" ? <EvidencePanel evidence={activeRun?.evidence} mode={mode} /> : null}
               {activeSupport === "reports" ? <ReportCenter mode={mode} reports={reports} /> : null}
-              {activeSupport === "analytics" ? <AnalyticsPanel className="min-h-[340px]" /> : null}
             </div>
           </div>
         </section>
       </div>
+        </>
+      )}
     </main>
+  );
+}
+
+function LiveAgentActivity({events}: {events: ApiAgentEvent[]}) {
+  const visibleEvents = [...events].slice(-12).reverse();
+  return (
+    <Card className="border-slate-200 shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+              <Activity className="h-3.5 w-3.5" />
+              Live Agent Activity
+            </div>
+            <div className="mt-1 text-sm text-slate-500">Real-time workflow events and audit summaries.</div>
+          </div>
+          <Badge variant="outline">{visibleEvents.length} events</Badge>
+        </div>
+
+        <div className="mt-4 max-h-[340px] space-y-2 overflow-y-auto pr-1">
+          {visibleEvents.length > 0 ? (
+            visibleEvents.map((event) => <AgentActivityRow event={event} key={event.event_id} />)
+          ) : (
+            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+              Agent events will appear here when analysis, visualization, approvals, or monitor workflows run.
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AgentActivityRow({event}: {event: ApiAgentEvent}) {
+  const Icon =
+    event.status === "failed" ? XCircle : event.status === "blocked" ? TriangleAlert : event.status === "started" ? CircleDashed : CheckCircle2;
+  const tone =
+    event.status === "failed"
+      ? "text-red-700"
+      : event.status === "blocked"
+        ? "text-orange-700"
+        : event.status === "started"
+          ? "text-blue-700"
+          : "text-emerald-700";
+  const artifact = event.data?.artifact_id ?? event.data?.tool_name;
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <div className="flex items-start gap-2">
+        <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone}`} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              {labelForAgentType(event.agent_type)}
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+              <Clock3 className="h-3 w-3" />
+              {shortTime(event.timestamp)}
+            </span>
+          </div>
+          <div className="mt-1 text-sm leading-5 text-slate-800">{event.message}</div>
+          {event.data?.output_summary ? (
+            <div className="mt-1 truncate text-xs text-slate-500">{String(event.data.output_summary)}</div>
+          ) : null}
+          {artifact ? <Badge className="mt-2" variant="muted">{String(artifact)}</Badge> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadingHotspotsScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white px-6 py-6 text-center shadow-sm">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md border border-orange-200 bg-orange-50">
+          <Flame className="h-6 w-6 animate-pulse text-orange-700" />
+        </div>
+        <div className="mt-4 text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Loading hotspots</div>
+        <div className="mt-2 text-xl font-semibold text-slate-950">Preparing the operations console</div>
+        <div className="mt-2 text-sm leading-6 text-slate-500">
+          Fetching active hotspot detections, state summaries, and AOI focus options.
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -575,6 +686,53 @@ function upsertById<T extends Record<string, any>, K extends keyof T>(items: T[]
 
 function mergeById<T extends Record<string, any>, K extends keyof T>(current: T[], incoming: T[], key: K) {
   return incoming.reduce((items, item) => upsertById(items, item, key), current);
+}
+
+async function timedClientCall<T>(name: string, call: () => Promise<T>): Promise<T> {
+  const startedAt = nowMs();
+  try {
+    return await call();
+  } finally {
+    console.info("[chat timing] frontend segment", {name, duration_ms: roundMs(nowMs() - startedAt)});
+  }
+}
+
+function nowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function roundMs(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function upsertEvent(events: ApiAgentEvent[]) {
+  const seen = new Map<string, ApiAgentEvent>();
+  for (const event of events) {
+    seen.set(event.event_id, event);
+  }
+  return [...seen.values()].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+}
+
+function labelForAgentType(agentType: string) {
+  const labels: Record<string, string> = {
+    coordinator: "Coordinator",
+    analysis: "Analysis",
+    elastic: "Elastic",
+    risk: "Risk Engine",
+    report: "Report Agent",
+    approval: "Approval",
+    visualization: "Visualization",
+    monitor: "Monitor"
+  };
+  return labels[agentType] ?? agentType;
+}
+
+function shortTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--:--";
+  }
+  return new Intl.DateTimeFormat("en-AU", {hour: "2-digit", minute: "2-digit", second: "2-digit"}).format(date);
 }
 
 function buildEvidenceSourceCount(evidence?: Record<string, any> | null) {

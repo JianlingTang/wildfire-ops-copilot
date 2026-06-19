@@ -15,3 +15,12 @@ def test_high_risk_question_routes_to_risk_explanation() -> None:
 
 def test_inspection_question_routes_to_operational_prioritization() -> None:
     assert classify_intent("Which area should we inspect first?") == "OPERATIONAL_PRIORITIZATION"
+
+
+def test_risk_trend_question_routes_to_risk_trend() -> None:
+    assert classify_intent("Show the risk trend for this AOI.") == "RISK_TREND"
+
+
+def test_prediction_question_routes_to_risk_prediction() -> None:
+    assert classify_intent("Predict wildfire risk for the next few days.") == "RISK_PREDICTION"
+    assert classify_intent("What if wind increases tomorrow?") == "WHAT_IF"

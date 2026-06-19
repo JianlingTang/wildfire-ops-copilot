@@ -7,6 +7,7 @@ import httpx
 from app.models.schemas import Aoi
 from app.tools.provider_utils import coerce_center, external_data_mode, http_user_agent, request_timeout_seconds
 
+MET_NORWAY_FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 
@@ -15,12 +16,12 @@ def get_weather_forecast(aoi: Aoi | dict, horizon: str = "7d") -> dict:
     if validation["status"] == "error":
         return validation
     if external_data_mode() == "demo":
-        return _demo_weather_forecast(horizon)
+        return {"status": "error", "message": "Weather provider is configured for demo mode; live data is required."}
 
     try:
-        return _fetch_live_weather_forecast(aoi, horizon)
+        return _fetch_met_norway_forecast(aoi, horizon)
     except Exception as exc:
-        return _demo_weather_forecast(horizon, message=f"Live weather request failed: {exc}")
+        return {"status": "error", "message": f"MET Norway weather request failed: {exc}"}
 
 
 def _validate_aoi(aoi: Aoi | dict) -> dict:
@@ -77,6 +78,66 @@ def _fetch_live_weather_forecast(aoi: Aoi | dict, horizon: str) -> dict:
             "forecast_start": daily.get("time", [None])[0],
             "forecast_end": daily.get("time", [None])[-1],
             "timezone": payload.get("timezone", "Australia/Sydney"),
+        },
+    }
+
+
+def _fetch_met_norway_forecast(aoi: Aoi | dict, horizon: str) -> dict:
+    latitude, longitude = coerce_center(aoi)
+    response = httpx.get(
+        MET_NORWAY_FORECAST_URL,
+        params={"lat": latitude, "lon": longitude},
+        headers={"User-Agent": http_user_agent()},
+        timeout=request_timeout_seconds(default=8.0),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    series = payload.get("properties", {}).get("timeseries", [])
+    limit = 168 if horizon == "7d" else 72 if horizon == "72h" else 24
+    temperatures: list[float] = []
+    humidity: list[float] = []
+    wind_speed: list[float] = []
+    wind_gusts: list[float] = []
+    precipitation: list[float] = []
+    times: list[str] = []
+    for item in series[:limit]:
+        if isinstance(item.get("time"), str):
+            times.append(item["time"])
+        data = item.get("data", {})
+        details = data.get("instant", {}).get("details", {})
+        if "air_temperature" in details:
+            temperatures.append(float(details["air_temperature"]))
+        if "relative_humidity" in details:
+            humidity.append(float(details["relative_humidity"]))
+        if "wind_speed" in details:
+            wind_speed.append(float(details["wind_speed"]) * 3.6)
+        if details.get("wind_speed_of_gust") is not None:
+            wind_gusts.append(float(details["wind_speed_of_gust"]) * 3.6)
+        for key in ("next_1_hours", "next_6_hours", "next_12_hours"):
+            amount = data.get(key, {}).get("details", {}).get("precipitation_amount")
+            if amount is not None:
+                precipitation.append(float(amount))
+                break
+
+    if not temperatures or not humidity or not wind_speed:
+        raise ValueError("MET Norway response was missing expected forecast series.")
+
+    wind_speed_max = round(max(wind_speed))
+    return {
+        "status": "success",
+        "mode": "live",
+        "source": "MET Norway Locationforecast API",
+        "fetched_at": datetime.now(UTC).isoformat(),
+        "data": {
+            "horizon": horizon,
+            "temperature_max": round(max(temperatures)),
+            "humidity_min": round(min(humidity)),
+            "wind_speed_max": wind_speed_max,
+            "wind_gust_max": round(max(wind_gusts)) if wind_gusts else wind_speed_max,
+            "rainfall_7d": round(sum(precipitation), 1),
+            "forecast_start": times[0] if times else None,
+            "forecast_end": times[-1] if times else None,
+            "timezone": "UTC",
         },
     }
 

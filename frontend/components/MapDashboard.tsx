@@ -83,22 +83,37 @@ export function MapDashboard({
 }
 
 function downloadVisualization(visualization: ApiHotspotVisualization) {
-  const csvRows = [
-    "lat,lon,density,max_power,latest_detection,normalized_intensity",
-    ...visualization.heatmap.cells.map((cell) =>
-      [cell.lat, cell.lon, cell.density, cell.max_power, cell.latest_detection, cell.normalized_intensity].join(",")
-    )
-  ];
-  const bundle = {
-    visualization,
-    csv: csvRows.join("\n")
-  };
-  const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: "application/json"});
+  if (visualization.preview?.data_url) {
+    downloadDataUrl(visualization.preview.data_url, visualization.downloads.png_filename ?? "hotspot-contour-map.png");
+  }
+  const interpretation = visualization.downloads.txt_content ?? [
+    visualization.interpretation.summary,
+    visualization.interpretation.recommendation,
+    visualization.interpretation.caveat
+  ].join("\n\n");
+  downloadBlob(new Blob([interpretation], {type: "text/plain;charset=utf-8"}), visualization.downloads.txt_filename ?? "hotspot-interpretation.txt");
+}
+
+function downloadDataUrl(dataUrl: string, filename: string) {
+  const [meta, encoded] = dataUrl.split(",");
+  const mime = meta.match(/data:(.*?);base64/)?.[1] ?? "application/octet-stream";
+  const binary = window.atob(encoded ?? "");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  downloadBlob(new Blob([bytes], {type: mime}), filename);
+}
+
+function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = visualization.downloads.json_filename || "hotspot-visualization.json";
+  anchor.download = filename;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
+  anchor.remove();
   URL.revokeObjectURL(url);
 }
 

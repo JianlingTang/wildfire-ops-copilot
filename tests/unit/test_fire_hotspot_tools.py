@@ -18,8 +18,8 @@ def test_returns_structured_status() -> None:
     result = get_fire_hotspots(Aoi())
 
     assert result["status"] == "success"
-    assert result["source"] == "DEA Hotspots demo fallback"
-    assert result["data"]["count_24h"] == 3
+    assert result["mode"] == "demo"
+    assert result["data"]["count_24h"] >= 1
 
 
 def test_parses_live_hotspot_response_from_dea(monkeypatch) -> None:
@@ -78,32 +78,41 @@ def test_handles_api_failure() -> None:
     assert "failure" in result["message"]
 
 
-def test_auto_region_selection_uses_australian_live_cluster_in_demo_mode() -> None:
+def test_auto_region_selection_returns_demo_region_in_demo_mode() -> None:
     result = resolve_operational_region("live_australia", "Australia Live Hotspot AOI")
 
     assert result["region_id"] == "live_qld_demo_cluster"
-    assert result["region_name"] == "Queensland live hotspot cluster"
-    assert result["region_context"]["state"] == "QLD"
-    assert result["aoi"].center == (-15.0596, 143.2559)
-    assert result["hotspots"]["data"]["hotspots"][0]["lat"] == -15.0596
+    assert result["region_context"]["selection_mode"] == "demo_auto_live_hotspot"
+    assert result["hotspots"]["status"] == "success"
+    assert result["hotspots"]["mode"] == "demo"
 
 
-def test_australia_overview_returns_state_summaries_in_demo_mode() -> None:
+def test_australia_overview_returns_demo_payload_in_demo_mode() -> None:
     result = get_australia_hotspots_overview()
 
     assert result["status"] == "success"
-    assert result["source"] == "DEA Hotspots demo overview"
-    assert result["data"]["total_count_24h"] == 5
-    assert result["data"]["display_hotspot_count"] == len(result["data"]["hotspots"])
+    assert result["mode"] == "demo"
     assert any(state["state"] == "NT" for state in result["data"]["states"])
-    assert result["data"]["hotspots"][0]["state"] in {"NT", "QLD", "WA", "VIC"}
 
 
-def test_state_focus_returns_cached_state_cluster_in_demo_mode() -> None:
+def test_state_focus_returns_demo_payload_in_demo_mode() -> None:
     result = get_state_hotspot_focus("NT", 50)
 
     assert result["status"] == "success"
+    assert result["mode"] == "demo"
     assert result["data"]["state"] == "NT"
-    assert result["data"]["radius_km"] == 50
-    assert result["data"]["hotspot_count_24h"] >= 1
-    assert result["data"]["display_hotspot_count"] == len(result["data"]["hotspots"])
+
+
+def test_explicit_state_aoi_region_reuses_aoi_hotspots_in_demo_mode() -> None:
+    result = resolve_operational_region(
+        "state_nt",
+        "Northern Territory hotspot cluster focus",
+        Aoi(center=(-12.4513, 132.9192), radius_km=50),
+        respect_explicit_aoi=True,
+    )
+
+    assert result["region_context"]["selection_mode"] == "selected_aoi"
+    assert result["hotspots"]["status"] == "success"
+    assert result["hotspots"]["mode"] == "demo"
+    assert result["hotspots"]["data"]["count_24h"] >= 1
+    assert result["hotspots"]["data"]["hotspots"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from typing import Any
 
@@ -20,9 +21,20 @@ from app.models.schemas import ChatRequest, ManualRunRequest, RunRecord
 from app.runtime.analysis import execute_analysis_request
 from app.runtime.base import AgentRuntime
 from app.runtime.intents import classify_intent
+from app.services.agent_events import new_trace_id, publish_agent_event
+from app.services.chat_conversations import (
+    analysis_required_response,
+    completed_run_for_request,
+    finalize_chat_response,
+    prepare_conversation,
+    should_block_for_analysis,
+)
 from app.services.firestore_store import store
 from app.services.hotspot_visualization import build_hotspot_visualization
+from app.services.mixed_intents import build_exposure_action_response, is_exposure_action_request
 from app.services.monitoring_tasks import create_monitor_task_from_chat
+from app.services.risk_trend import build_risk_prediction_response, build_risk_trend_response
+from app.services.timing_trace import TimingTrace
 from wildfire_ops_agent.agent import root_agent
 
 APP_NAME = os.getenv("ADK_APP_NAME", "wildfire_ops_agent")
@@ -45,84 +57,330 @@ class AdkRuntime(AgentRuntime):
         return asyncio.run(self._route_chat_async(request))
 
     async def _route_chat_async(self, request: ChatRequest) -> dict:
-        intent = classify_intent(request.message)
-        try:
-            _ensure_vertex_configuration()
-            session_service = _get_session_service()
-            runner = _get_runner()
-            user_id = request.user_id or "demo_officer"
-            session_id = _session_id_for(request)
-            await _ensure_session(session_service, user_id, session_id)
-            await _merge_request_state(session_service, user_id, session_id, request)
-
-            final_text: str | None = None
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=types.Content(
-                    role="user",
-                    parts=[types.Part(text=_message_with_operational_context(request))],
-                ),
-                state_delta=_state_delta_for_request(request),
-            ):
-                if event.is_final_response():
-                    text = _extract_text(event.content)
-                    if text:
-                        final_text = text
-
-            session = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
-            session_state = session.state if session else {}
-            runtime_intent = str(session_state.get("last_intent") or "")
-            if not runtime_intent:
-                fallback = _route_deterministic_workflow(
-                    request,
-                    intent,
-                    correction_summary="Deterministic fallback ran because the LLM did not call a workflow tool.",
-                )
-                if fallback is not None:
-                    return fallback
-            elif _should_correct_llm_route(intent, runtime_intent):
-                corrected = _route_deterministic_workflow(
-                    request,
-                    intent,
-                    correction_summary=(
-                        f"Deterministic guardrail corrected route from "
-                        f"{runtime_intent or 'no tool call'} to {intent}."
-                    ),
-                )
-                if corrected is not None:
-                    return corrected
-
-            response = _build_runtime_response(request, session_state, final_text)
-            if _missing_tool_result(response):
-                fallback = _route_deterministic_workflow(
-                    request,
-                    intent,
-                    correction_summary="Deterministic fallback ran because the LLM did not call a workflow tool.",
-                )
-                if fallback is not None:
-                    return fallback
-            if _needs_focus_aoi_fallback(response, request, intent):
-                fallback = _route_deterministic_workflow(
-                    request,
-                    intent,
-                    correction_summary=(
-                        "Deterministic guardrail answered from Focus AOI context because "
-                        "the LLM tool result did not use the selected AOI."
-                    ),
-                )
-                if fallback is not None:
-                    return fallback
-            return response
-        except Exception as exc:
-            fallback = _route_deterministic_workflow(
+        timing = TimingTrace()
+        with timing.step("prepare_conversation"):
+            conversation, request = prepare_conversation(request)
+        trace_id = new_trace_id()
+        with timing.step("classify_intent"):
+            intent = classify_intent(request.message)
+        _publish_chat_event(
+            trace_id, request, conversation.conversation_id, "started", "Coordinator received chat request.", intent
+        )
+        _publish_chat_event(
+            trace_id, request, conversation.conversation_id, "completed", f"Intent classified: {intent}.", intent
+        )
+        with timing.step("analysis_gate", intent=intent):
+            blocked_for_analysis = should_block_for_analysis(intent, request, conversation)
+        if blocked_for_analysis:
+            _publish_chat_event(
+                trace_id,
                 request,
+                conversation.conversation_id,
+                "blocked",
+                "Analysis gate blocked request before workflow tool calls.",
                 intent,
-                correction_summary=f"Deterministic fallback ran because ADK runtime failed: {exc}",
             )
+            response = analysis_required_response(request, conversation, intent, mode="adk", trace_id=trace_id)
+            return _attach_timing_trace(response, timing, intent)
+        _publish_chat_event(
+            trace_id, request, conversation.conversation_id, "completed", "Analysis gate passed.", intent
+        )
+        if intent == "RISK_TREND":
+            with timing.step("tool_call", intent=intent, tool="risk_trend"):
+                run = completed_run_for_request(request, conversation)
+                payload = build_risk_trend_response(request, run, mode="adk")
+            _publish_artifact_event(
+                trace_id, request, conversation.conversation_id, "visualization", "Risk trend chart generated.", intent
+            )
+            return _finalize_chat_response_timed(
+                request,
+                conversation,
+                {"intent": intent, "mode": "adk", "response": payload, "trace_id": trace_id},
+                timing,
+            )
+        if intent == "RISK_PREDICTION":
+            with timing.step("tool_call", intent=intent, tool="risk_prediction"):
+                run = completed_run_for_request(request, conversation)
+                payload = build_risk_prediction_response(request, run, mode="adk")
+            _publish_artifact_event(
+                trace_id, request, conversation.conversation_id, "risk", "Risk prediction generated.", intent
+            )
+            return _finalize_chat_response_timed(
+                request,
+                conversation,
+                {"intent": intent, "mode": "adk", "response": payload, "trace_id": trace_id},
+                timing,
+            )
+        if is_exposure_action_request(request.message):
+            with timing.step("tool_call", intent="EXPOSURE_ACTION", tool="mixed_exposure_action"):
+                run = completed_run_for_request(request, conversation)
+                response = build_exposure_action_response(request, run, mode="adk")
+            response["trace_id"] = trace_id
+            _publish_artifact_event(
+                trace_id,
+                request,
+                conversation.conversation_id,
+                "approval",
+                "Approval requested for mixed exposure/action request.",
+                "EXPOSURE_ACTION",
+            )
+            return _finalize_chat_response_timed(request, conversation, response, timing)
+        fast_path = _fast_path_workflow_intents(intent)
+        if fast_path:
+            with timing.step("tool_call", intent=intent, tool="deterministic_workflow"):
+                deterministic_response = _route_deterministic_workflow(request, intent)
+            if deterministic_response is not None:
+                deterministic_response["trace_id"] = trace_id
+                _publish_chat_event(
+                    trace_id,
+                    request,
+                    conversation.conversation_id,
+                    "completed",
+                    f"Skipped Gemini router for deterministic {intent} workflow.",
+                    intent,
+                )
+                return _finalize_chat_response_timed(request, conversation, deterministic_response, timing)
+
+        try:
+            with timing.step("adk_setup", intent=intent):
+                _ensure_vertex_configuration()
+                session_service = _get_session_service()
+                runner = _get_runner()
+                user_id = request.user_id or "demo_officer"
+                session_id = _session_id_for(request)
+                await _ensure_session(session_service, user_id, session_id)
+                await _merge_request_state(session_service, user_id, session_id, request)
+
+            with timing.step("adk_llm_call", intent=intent):
+                final_text = await _run_llm_turn_with_retries(
+                    lambda: runner.run_async(
+                        user_id=user_id,
+                        session_id=session_id,
+                        new_message=types.Content(
+                            role="user",
+                            parts=[types.Part(text=_message_with_operational_context(request))],
+                        ),
+                        state_delta=_state_delta_for_request(request),
+                    )
+                )
+
+            with timing.step("adk_session_read", intent=intent):
+                session = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+                session_state = session.state if session else {}
+                runtime_intent = str(session_state.get("last_intent") or "")
+            if not runtime_intent:
+                if intent == "ACTION_COMMAND":
+                    with timing.step("tool_call", intent=intent, tool="action_fallback_no_llm_tool"):
+                        fallback = _route_deterministic_workflow(
+                            request,
+                            intent,
+                            correction_summary=(
+                                "Deterministic fallback ran because Gemini did not call the action workflow tool."
+                            ),
+                        )
+                    if fallback is not None:
+                        fallback["trace_id"] = trace_id
+                        return _finalize_chat_response_timed(request, conversation, fallback, timing)
+                if final_text and _allows_context_answer(intent):
+                    return _finalize_chat_response_timed(
+                        request,
+                        conversation,
+                        _with_trace_id(
+                            _context_answer_response(
+                                request,
+                                final_text,
+                                "Gemini answered from context_json without workflow tools.",
+                            ),
+                            trace_id,
+                        ),
+                        timing,
+                    )
+                with timing.step("repair_llm_call", intent=intent, reason="missing_runtime_intent"):
+                    repair_text = await _run_llm_repair_answer(
+                        runner,
+                        user_id,
+                        session_id,
+                        request,
+                        "The first Gemini/Vertex AI turn did not call a workflow tool or produce a usable final "
+                        "answer.",
+                    )
+                if repair_text:
+                    return _finalize_chat_response_timed(
+                        request,
+                        conversation,
+                        _with_trace_id(_llm_repair_response(intent, repair_text), trace_id),
+                        timing,
+                    )
+                return _finalize_chat_response_timed(
+                    request,
+                    conversation,
+                    _with_trace_id(
+                        _error_response(
+                            intent,
+                            (
+                                "Gemini/Vertex AI returned final text but did not call the required workflow tool."
+                                if final_text
+                                else "Gemini/Vertex AI produced no final text and did not call a workflow tool."
+                            ),
+                        ),
+                        trace_id,
+                    ),
+                    timing,
+                )
+            elif _should_correct_llm_route(intent, runtime_intent):
+                with timing.step("tool_call", intent=intent, tool="corrected_deterministic_workflow"):
+                    corrected = _route_deterministic_workflow(
+                        request,
+                        intent,
+                        correction_summary=(
+                            f"Deterministic guardrail corrected route from "
+                            f"{runtime_intent or 'no tool call'} to {intent}."
+                        ),
+                    )
+                if corrected is not None:
+                    corrected["trace_id"] = trace_id
+                    return _finalize_chat_response_timed(request, conversation, corrected, timing)
+
+            with timing.step("build_runtime_response", intent=intent, runtime_intent=runtime_intent):
+                response = _build_runtime_response(request, session_state, final_text)
+            if intent == "ACTION_COMMAND" and _missing_action_payload(response):
+                with timing.step("tool_call", intent=intent, tool="action_fallback_missing_payload"):
+                    fallback = _route_deterministic_workflow(
+                        request,
+                        intent,
+                        correction_summary=(
+                            "Deterministic fallback ran because Gemini did not return an action approval payload."
+                        ),
+                    )
+                if fallback is not None:
+                    fallback["trace_id"] = trace_id
+                    return _finalize_chat_response_timed(request, conversation, fallback, timing)
+            if _missing_tool_result(response):
+                if intent == "ACTION_COMMAND":
+                    with timing.step("tool_call", intent=intent, tool="action_fallback_missing_tool_result"):
+                        fallback = _route_deterministic_workflow(
+                            request,
+                            intent,
+                            correction_summary=(
+                                "Deterministic fallback ran because Gemini did not return an action workflow payload."
+                            ),
+                        )
+                    if fallback is not None:
+                        fallback["trace_id"] = trace_id
+                        return _finalize_chat_response_timed(request, conversation, fallback, timing)
+                if final_text and _allows_context_answer(intent):
+                    return _finalize_chat_response_timed(
+                        request,
+                        conversation,
+                        _with_trace_id(_context_answer_response(
+                            request,
+                            final_text,
+                            "Gemini did not produce a structured tool payload; answered from context_json.",
+                        ), trace_id),
+                        timing,
+                    )
+                with timing.step("repair_llm_call", intent=intent, reason="missing_tool_result"):
+                    repair_text = await _run_llm_repair_answer(
+                        runner,
+                        user_id,
+                        session_id,
+                        request,
+                        "The first Gemini/Vertex AI turn did not produce a structured workflow payload.",
+                    )
+                if repair_text:
+                    return _finalize_chat_response_timed(
+                        request,
+                        conversation,
+                        _with_trace_id(_llm_repair_response(intent, repair_text), trace_id),
+                        timing,
+                    )
+                return _finalize_chat_response_timed(
+                    request,
+                    conversation,
+                    _with_trace_id(
+                        _error_response(
+                            intent,
+                            "Gemini/Vertex AI did not produce a structured tool payload or final text.",
+                        ),
+                        trace_id,
+                    ),
+                    timing,
+                )
+            if _needs_focus_aoi_fallback(response, request, intent):
+                return _finalize_chat_response_timed(
+                    request,
+                    conversation,
+                    _with_trace_id(
+                        _error_response(
+                            intent,
+                            "Gemini/Vertex AI did not answer from the selected AOI context. Retry the question.",
+                        ),
+                        trace_id,
+                    ),
+                    timing,
+                )
+            response["trace_id"] = trace_id
+            return _finalize_chat_response_timed(request, conversation, response, timing)
+        except Exception as exc:
+            if _is_resource_exhausted_error(exc):
+                return _finalize_chat_response_timed(
+                    request,
+                    conversation,
+                    _with_trace_id(_error_response(intent, f"Gemini/Vertex AI runtime failed: {exc}"), trace_id),
+                    timing,
+                )
+            with timing.step("tool_call", intent=intent, tool="local_analyst_fallback"):
+                analyst_fallback = _route_local_analyst_synthesis(
+                    request,
+                    intent,
+                    correction_summary=f"Local synthesis ran because ADK runtime failed: {exc}",
+                )
+            if analyst_fallback is not None:
+                analyst_fallback["trace_id"] = trace_id
+                return _finalize_chat_response_timed(request, conversation, analyst_fallback, timing)
+            if _allows_context_answer(intent):
+                return _finalize_chat_response_timed(
+                    request,
+                    conversation,
+                    _with_trace_id(
+                        _error_response(intent, f"Gemini/Vertex AI runtime failed: {exc}"),
+                        trace_id,
+                    ),
+                    timing,
+                )
+            with timing.step("tool_call", intent=intent, tool="deterministic_exception_fallback"):
+                fallback = _route_deterministic_workflow(
+                    request,
+                    intent,
+                    correction_summary=f"Deterministic fallback ran because ADK runtime failed: {exc}",
+                )
             if fallback is not None:
-                return fallback
-            return _error_response(intent, f"ADK runtime failed: {exc}")
+                fallback["trace_id"] = trace_id
+                return _finalize_chat_response_timed(request, conversation, fallback, timing)
+            return _finalize_chat_response_timed(
+                request,
+                conversation,
+                _with_trace_id(_error_response(intent, f"ADK runtime failed: {exc}"), trace_id),
+                timing,
+            )
+
+
+def _finalize_chat_response_timed(
+    request: ChatRequest,
+    conversation: Any,
+    response: dict[str, Any],
+    timing: TimingTrace,
+) -> dict[str, Any]:
+    with timing.step("finalize_response", intent=response.get("intent")):
+        finalized = finalize_chat_response(request, conversation, response)
+    return _attach_timing_trace(finalized, timing, str(finalized.get("intent") or response.get("intent") or "UNKNOWN"))
+
+
+def _attach_timing_trace(response: dict[str, Any], timing: TimingTrace, intent: str) -> dict[str, Any]:
+    trace = timing.snapshot()
+    trace["intent"] = intent
+    response["timing_trace"] = trace
+    return response
 
 
 def _route_deterministic_workflow(
@@ -169,19 +427,176 @@ def _route_deterministic_workflow(
             result["answer"] = "Generated a fresh operations brief from the latest completed run."
             return {"intent": intent, "mode": "adk", "response": result, "report": result["report"]}
         return {"intent": intent, "mode": "adk", "response": result}
-    if intent in {"CHANGE_EXPLANATION", "RISK_EXPLANATION", "OPERATIONAL_PRIORITIZATION"}:
-        payload = answer_operational_question(request.message, run, request.region_name, request.aoi)
-        _ensure_tool_trace(payload, _tool_trace_for_intent(intent, payload, request))
-        _prepend_correction_trace(payload, correction_summary)
-        return {
-            "intent": intent,
-            "mode": "adk",
-            "response": payload,
-        }
+    if intent in {
+        "CHANGE_EXPLANATION",
+        "WEATHER_CHANGE",
+        "WIND_CHANGE",
+        "RISK_EXPLANATION",
+        "OPERATIONAL_PRIORITIZATION",
+        "EXPOSURE_LOOKUP",
+        "QUESTION",
+    }:
+        return _route_local_analyst_synthesis(request, intent, correction_summary=correction_summary)
+    return _error_response(intent, "Gemini/Vertex AI did not return a usable response.")
+
+
+def _with_trace_id(response: dict[str, Any], trace_id: str) -> dict[str, Any]:
+    response["trace_id"] = trace_id
+    return response
+
+
+def _fast_path_workflow_intents(intent: str) -> bool:
+    return intent in {
+        "ANALYZE_AND_REPORT",
+        "WHAT_IF",
+        "REPORT_REQUEST",
+        "HOTSPOT_VISUALIZATION",
+        "MONITOR_TASK",
+        "CHANGE_EXPLANATION",
+        "WEATHER_CHANGE",
+        "WIND_CHANGE",
+        "RISK_EXPLANATION",
+        "OPERATIONAL_PRIORITIZATION",
+        "EXPOSURE_LOOKUP",
+    }
+
+
+def _route_local_analyst_synthesis(
+    request: ChatRequest,
+    intent: str,
+    correction_summary: str | None = None,
+) -> dict[str, Any] | None:
+    if intent not in {
+        "CHANGE_EXPLANATION",
+        "WEATHER_CHANGE",
+        "WIND_CHANGE",
+        "RISK_EXPLANATION",
+        "OPERATIONAL_PRIORITIZATION",
+        "EXPOSURE_LOOKUP",
+        "QUESTION",
+    }:
+        return None
+    run = _resolve_run_for_request(request)
     payload = answer_operational_question(request.message, run, request.region_name, request.aoi)
-    _ensure_tool_trace(payload, _tool_trace_for_intent("QUESTION", payload, request))
+    payload["mode"] = "adk"
+    _ensure_tool_trace(payload, _tool_trace_for_intent(intent, payload, request))
     _prepend_correction_trace(payload, correction_summary)
-    return {"intent": intent, "mode": "adk", "response": payload}
+    if payload.get("requires_synthesis"):
+        _apply_synthesis_answer(payload, None, request)
+    response: dict[str, Any] = {"intent": intent, "mode": "adk", "response": payload}
+    if run:
+        response["run"] = run
+    return response
+
+
+async def _run_llm_turn_with_retries(run_factory: Any) -> str | None:
+    attempts = int(os.getenv("ADK_GEMINI_RETRY_ATTEMPTS", "3"))
+    base_delay = float(os.getenv("ADK_GEMINI_RETRY_BASE_DELAY_SECONDS", "1.0"))
+    last_error: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            final_text: str | None = None
+            async for event in run_factory():
+                if event.is_final_response():
+                    text = _extract_text(event.content)
+                    if text:
+                        final_text = text
+            return final_text
+        except Exception as exc:
+            last_error = exc
+            if not _is_resource_exhausted_error(exc) or attempt >= attempts - 1:
+                raise
+            await asyncio.sleep(base_delay * (2**attempt))
+    if last_error:
+        raise last_error
+    return None
+
+
+def _is_resource_exhausted_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "429" in text or "resource_exhausted" in text or "resource has been exhausted" in text
+
+
+async def _run_llm_repair_answer(
+    runner: Runner,
+    user_id: str,
+    session_id: str,
+    request: ChatRequest,
+    reason: str,
+) -> str | None:
+    return await _run_llm_turn_with_retries(
+        lambda: runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=types.Content(
+                role="user",
+                parts=[types.Part(text=_repair_message_with_operational_context(request, reason))],
+            ),
+            state_delta={},
+        )
+    )
+
+
+def _llm_repair_response(intent: str, answer: str) -> dict[str, Any]:
+    return {
+        "intent": intent,
+        "mode": "adk",
+        "response": {
+            "status": "success",
+            "mode": "adk",
+            "answer": answer,
+            "tool_trace": [
+                _trace_item(
+                    "Main Coordinator",
+                    "Recovered with Gemini repair answer.",
+                    (
+                        "Gemini/Vertex AI produced a fallback answer after the initial ADK turn returned no usable "
+                        "payload."
+                    ),
+                )
+            ],
+        },
+    }
+
+
+def _publish_chat_event(
+    trace_id: str,
+    request: ChatRequest,
+    conversation_id: str,
+    status: str,
+    message: str,
+    intent: str,
+) -> None:
+    publish_agent_event(
+        trace_id=trace_id,
+        conversation_id=conversation_id,
+        run_id=request.run_id,
+        region_id=request.region_id,
+        agent_type="coordinator",
+        status=status,
+        message=message,
+        data={"intent": intent, "mode": "adk"},
+    )
+
+
+def _publish_artifact_event(
+    trace_id: str,
+    request: ChatRequest,
+    conversation_id: str,
+    agent_type: str,
+    message: str,
+    intent: str,
+) -> None:
+    publish_agent_event(
+        trace_id=trace_id,
+        conversation_id=conversation_id,
+        run_id=request.run_id,
+        region_id=request.region_id,
+        agent_type=agent_type,
+        status="completed",
+        message=message,
+        data={"intent": intent, "mode": "adk"},
+    )
 
 
 def _resolve_run_for_request(request: ChatRequest) -> RunRecord | None:
@@ -226,6 +641,24 @@ def _operator_summary(run_record: RunRecord, report: dict, alert: dict | None) -
     elastic = run_record.evidence.get("elastic", {})
     elastic_mode = elastic.get("mode", "unknown")
     elastic_items = elastic.get("evidence", [])
+    hotspots = run_record.evidence.get("hotspots", {})
+    hotspot_count = hotspots.get("data", {}).get("count_24h")
+    weather = run_record.evidence.get("weather", {})
+    weather_data = weather.get("data", {})
+    warnings = run_record.evidence.get("official_warnings", {})
+    warning_count = warnings.get("data", {}).get("incident_count")
+    evidence_parts = []
+    if hotspot_count is not None:
+        evidence_parts.append(f"the hotspot tool found {hotspot_count} detections in the last 24 hours")
+    if weather_data:
+        evidence_parts.append(
+            "the weather tool shows "
+            f"{weather_data.get('wind_gust_max', 'unknown')} km/h gusts, "
+            f"{weather_data.get('humidity_min', 'unknown')}% minimum humidity, and "
+            f"{weather_data.get('rainfall_7d', 'unknown')} mm seven-day rainfall"
+        )
+    if warning_count is not None:
+        evidence_parts.append(f"the warnings tool found {warning_count} nearby official warnings")
     if elastic_items:
         titles = ", ".join(str(item.get("title", "Elastic MCP evidence")) for item in elastic_items[:2])
         evidence_sentence = f"Elastic MCP evidence ({elastic_mode} mode) retrieved {titles}."
@@ -236,9 +669,14 @@ def _operator_summary(run_record: RunRecord, report: dict, alert: dict | None) -
         if alert
         else "No alert was created for this run."
     )
+    analysis_sentence = (
+        f"after a chat-driven analysis using {', '.join(evidence_parts)}. "
+        if evidence_parts
+        else "after a chat-driven analysis. "
+    )
     return (
         f"{run_record.region_name} is currently {run_record.risk_level} at {run_record.risk_score}/100 "
-        "after a chat-driven analysis. "
+        f"{analysis_sentence}"
         f"{evidence_sentence} "
         f"The top recommendation is to {run_record.recommendations[0].lower()} "
         f"{report['title']} was generated and saved to the dashboard. {alert_sentence}"
@@ -261,8 +699,11 @@ def _should_correct_llm_route(classified_intent: str, runtime_intent: str) -> bo
         "ACTION_COMMAND": "ACTION_COMMAND",
         "REPORT_REQUEST": "REPORT_REQUEST",
         "CHANGE_EXPLANATION": "ANALYST_QA",
+        "WEATHER_CHANGE": "ANALYST_QA",
+        "WIND_CHANGE": "ANALYST_QA",
         "RISK_EXPLANATION": "ANALYST_QA",
         "OPERATIONAL_PRIORITIZATION": "ANALYST_QA",
+        "EXPOSURE_LOOKUP": "ANALYST_QA",
         "HOTSPOT_VISUALIZATION": "HOTSPOT_VISUALIZATION",
         "MONITOR_TASK": "MONITOR_TASK",
     }.get(classified_intent)
@@ -278,8 +719,25 @@ def _missing_tool_result(response: dict[str, Any]) -> bool:
     )
 
 
+def _missing_action_payload(response: dict[str, Any]) -> bool:
+    payload = response.get("response")
+    return not (
+        isinstance(payload, dict)
+        and isinstance(payload.get("action"), dict)
+        and isinstance(payload.get("approval"), dict)
+    )
+
+
 def _needs_focus_aoi_fallback(response: dict[str, Any], request: ChatRequest, classified_intent: str) -> bool:
-    if classified_intent not in {"CHANGE_EXPLANATION", "RISK_EXPLANATION", "OPERATIONAL_PRIORITIZATION", "QUESTION"}:
+    if classified_intent not in {
+        "CHANGE_EXPLANATION",
+        "WEATHER_CHANGE",
+        "WIND_CHANGE",
+        "RISK_EXPLANATION",
+        "OPERATIONAL_PRIORITIZATION",
+        "EXPOSURE_LOOKUP",
+        "QUESTION",
+    }:
         return False
     if not (request.region_name and request.aoi):
         return False
@@ -305,6 +763,48 @@ def _error_response(intent: str, message: str) -> dict[str, Any]:
                     status="failed",
                 )
             ],
+        },
+    }
+
+
+def _allows_context_answer(intent: str) -> bool:
+    return intent in {"QUESTION", "CHANGE_EXPLANATION", "RISK_EXPLANATION", "OPERATIONAL_PRIORITIZATION"}
+
+
+def _context_answer_response(
+    request: ChatRequest,
+    final_text: str | None,
+    reason: str,
+    *,
+    status: str = "success",
+) -> dict[str, Any]:
+    run = _resolve_run_for_request(request)
+    if not final_text:
+        return _error_response(
+            "CONTEXT_ANSWER",
+            "Gemini/Vertex AI did not return an answer from the provided context.",
+        )
+    trace_status = "completed" if status == "success" else "failed"
+    return {
+        "intent": "CONTEXT_ANSWER",
+        "mode": "adk",
+        "response": {
+            "status": status,
+            "mode": "adk",
+            "answer": final_text,
+            "tool_trace": [
+                _trace_item(
+                    "Context JSON",
+                    "Answered without workflow tool calls.",
+                    reason,
+                    status=trace_status,
+                )
+            ],
+            "tool_results": {
+                "context_source": "conversation_summary_latest_analysis_elastic",
+                "run_id": run.run_id if run else None,
+                "elastic_mode": run.evidence.get("elastic", {}).get("mode") if run else None,
+            },
         },
     }
 
@@ -414,7 +914,11 @@ def _tool_trace_for_intent(intent: str, payload: dict[str, Any], request: ChatRe
                 "Selected Monitor Task Workflow.",
                 task.get("region_name", request.region_name),
             ),
-            _trace_item("Monitoring Scheduler", "Created recurring risk check.", "10 minute interval"),
+            _trace_item(
+                "Monitoring Scheduler",
+                "Created recurring risk check.",
+                f"{task.get('interval_minutes', 10)} minute interval",
+            ),
             _trace_item("Alert Rule", "Configured material-change alerting.", "score delta >= 12"),
         ]
     if intent == "REPORT_REQUEST":
@@ -532,25 +1036,102 @@ def _state_delta_for_request(request: ChatRequest) -> dict[str, Any]:
 
 
 def _message_with_operational_context(request: ChatRequest) -> str:
-    context: dict[str, Any] = {
-        "region_id": request.region_id,
-        "region_name": request.region_name,
-        "user_id": request.user_id,
-        "run_id": request.run_id,
-    }
-    if request.aoi and request.aoi.center:
-        context["aoi_center"] = list(request.aoi.center)
-        context["radius_km"] = request.aoi.radius_km
+    context = _context_json_for_request(request)
+    conversation = store.conversations.get(request.conversation_id or "")
+    compressed_context = conversation.compressed_context if conversation else ""
     return (
         f"Operator request: {request.message}\n"
         f"Deterministic safety classifier intent hint: {classify_intent(request.message)}\n"
-        f"Focus AOI context for workflow tools: {context}\n"
-        "When calling a workflow tool, pass the operator request and any available "
-        "region_id, region_name, aoi_center, radius_km, run_id, and user_id values."
+        f"context_json: {json.dumps(context, default=str)}\n"
+        f"Compressed conversation context: {compressed_context or 'none'}\n"
+        "First decide whether a workflow tool is required. Direct context-only answers are allowed only for factual "
+        "lookups already present in context_json, such as AOI center, radius, latest run id, risk score, report "
+        "metadata, "
+        "or Elastic evidence file names. Operational judgment or evidence synthesis questions, including inspection "
+        "priority, why risk is high, what changed, wind or weather change since yesterday, exposed assets, spatial "
+        "exposure, roads, towns, protected areas, recommendations, or next steps, must call analyst_question_tool. "
+        "Call other tools only for analysis, scenario computation, report generation, visualization, monitoring, "
+        "approval-gated actions, or fresh external retrieval. "
+        "When a tool returns structured evidence, synthesize the final answer for the exact requested dimension. "
+        "If the evidence packet includes missing baseline data, say what is missing instead of answering a nearby "
+        "question. "
+        "If context_json lacks the answer, say exactly what is missing. When calling a workflow tool, pass "
+        "the operator request and any available region_id, region_name, aoi_center, radius_km, run_id, "
+        "and user_id values."
     )
 
 
+def _repair_message_with_operational_context(request: ChatRequest, reason: str) -> str:
+    context = _context_json_for_request(request)
+    conversation = store.conversations.get(request.conversation_id or "")
+    compressed_context = conversation.compressed_context if conversation else ""
+    intent = classify_intent(request.message)
+    return (
+        "The previous ADK turn failed to produce a usable operator response.\n"
+        f"Failure reason: {reason}\n"
+        f"Operator request: {request.message}\n"
+        f"Intent hint: {intent}\n"
+        f"context_json: {json.dumps(context, default=str)}\n"
+        f"Compressed conversation context: {compressed_context or 'none'}\n"
+        "Produce one concise operator-facing answer using only the supplied context_json and conversation context. "
+        "Do not call tools in this repair turn. If a required workflow tool did not run, do not claim that an action, "
+        "report, monitor, visualization, or analysis was created. Instead explain what failed and what the operator "
+        "can safely infer from the available context. For inspection-priority or risk questions, answer directly from "
+        "latest_run recommendations, evidence, and selected_aoi when available. If the supplied context is "
+        "insufficient, "
+        "say exactly what is missing."
+    )
+
+
+def _context_json_for_request(request: ChatRequest) -> dict[str, Any]:
+    run = _resolve_run_for_request(request)
+    selected_aoi: dict[str, Any] = {
+        "region_id": request.region_id,
+        "region_name": request.region_name,
+        "run_id": request.run_id,
+        "conversation_id": request.conversation_id,
+    }
+    if request.aoi and request.aoi.center:
+        selected_aoi["center"] = list(request.aoi.center)
+        selected_aoi["radius_km"] = request.aoi.radius_km
+    latest_run = None
+    evidence_summary = {}
+    if run:
+        latest_run = {
+            "run_id": run.run_id,
+            "region_id": run.region_id,
+            "region_name": run.region_name,
+            "risk_score": run.risk_score,
+            "risk_level": run.risk_level,
+            "drivers": run.risk_assessment.get("drivers", []),
+            "recommendations": run.recommendations,
+        }
+        region_context = run.evidence.get("region_context", {})
+        if region_context:
+            selected_aoi.setdefault("center", region_context.get("center"))
+            selected_aoi.setdefault("radius_km", region_context.get("radius_km"))
+        elastic = run.evidence.get("elastic", {})
+        evidence_summary = {
+            "region_context": region_context,
+            "hotspots": run.evidence.get("hotspots", {}).get("data", {}),
+            "weather": run.evidence.get("weather", {}).get("data", {}),
+            "spatial": run.evidence.get("spatial", {}).get("data", {}),
+            "official_warnings": run.evidence.get("official_warnings", {}).get("data", {}),
+            "elastic": {
+                "mode": elastic.get("mode"),
+                "evidence": elastic.get("evidence", [])[:3],
+            },
+        }
+    return {
+        "selected_aoi": selected_aoi,
+        "latest_run": latest_run,
+        "evidence": evidence_summary,
+    }
+
+
 def _session_id_for(request: ChatRequest) -> str:
+    if request.conversation_id:
+        return f"conversation:{request.conversation_id}"
     if request.run_id:
         return f"run:{request.run_id}"
     region = request.region_id or settings.demo_region_id
@@ -599,7 +1180,9 @@ def _build_runtime_response(
     else:
         payload = dict(payload)
         payload.setdefault("mode", "adk")
-        if final_text:
+        if payload.get("requires_synthesis"):
+            _apply_synthesis_answer(payload, final_text, request)
+        elif final_text and not _has_successful_tool_answer(payload):
             payload["answer"] = final_text
 
     run = _lookup_store_item(store.runs, state.get("last_run_id"))
@@ -625,6 +1208,211 @@ def _build_runtime_response(
     if alert is not None:
         response["alert"] = alert
     return response
+
+
+def _has_successful_tool_answer(payload: dict[str, Any]) -> bool:
+    return (
+        payload.get("status") == "success"
+        and bool(str(payload.get("answer") or "").strip())
+        and (
+            bool(payload.get("tool_trace"))
+            or bool(payload.get("tool_summary"))
+            or bool(payload.get("recommendations"))
+            or bool(payload.get("action"))
+            or bool(payload.get("report"))
+        )
+    )
+
+
+def _apply_synthesis_answer(payload: dict[str, Any], final_text: str | None, request: ChatRequest) -> None:
+    if final_text and _valid_synthesis_answer(final_text, payload):
+        payload["answer"] = final_text
+        payload["synthesis_source"] = "llm"
+        return
+    payload["answer"] = _safe_synthesis_answer(payload, request)
+    payload["synthesis_source"] = "validator"
+    trace = payload.setdefault("tool_trace", [])
+    trace.append(
+        _trace_item(
+            "Response Validator",
+            "Validated final answer against requested dimension.",
+            "LLM final text was missing or off-target; returned structured evidence synthesis.",
+            status="completed",
+        )
+    )
+
+
+def _valid_synthesis_answer(answer: str, payload: dict[str, Any]) -> bool:
+    lowered = answer.lower()
+    question_type = str(payload.get("question_type") or "")
+    if payload.get("missing") and not any(
+        term in lowered
+        for term in ["missing", "cannot", "can't", "do not have", "don't have", "need", "no baseline"]
+    ):
+        return False
+    if question_type == "wind_change":
+        return "wind" in lowered and any(
+            term in lowered for term in ["yesterday", "baseline", "previous", "missing"]
+        )
+    if question_type == "weather_change":
+        return "weather" in lowered and any(
+            term in lowered for term in ["yesterday", "baseline", "previous", "missing"]
+        )
+    if question_type == "overall_change":
+        return any(term in lowered for term in ["changed", "change", "yesterday", "baseline", "previous"])
+    if question_type == "exposure_lookup":
+        return any(term in lowered for term in ["asset", "protected", "park", "road", "town", "settlement"])
+    return bool(answer.strip())
+
+
+def _safe_synthesis_answer(payload: dict[str, Any], request: ChatRequest) -> str:
+    question_type = str(payload.get("question_type") or "operational_summary")
+    raw_facts = payload.get("facts")
+    facts: dict[str, Any] = raw_facts if isinstance(raw_facts, dict) else {}
+    raw_current = facts.get("current")
+    current: dict[str, Any] = raw_current if isinstance(raw_current, dict) else {}
+    raw_previous = facts.get("previous")
+    previous: dict[str, Any] | None = raw_previous if isinstance(raw_previous, dict) else None
+    raw_deltas = facts.get("deltas")
+    deltas: dict[str, Any] = raw_deltas if isinstance(raw_deltas, dict) else {}
+    missing = [str(item) for item in payload.get("missing", [])]
+    region = current.get("region_name") or request.region_name or request.region_id or "the selected AOI"
+    if payload.get("status") == "missing_context" and not current:
+        missing_text = ", ".join(missing) or "completed analysis context"
+        return f"I need {missing_text} before I can answer this operational question for {region}."
+    if question_type == "wind_change":
+        return _wind_change_answer(region, current, previous, deltas, missing)
+    if question_type == "weather_change":
+        return _weather_change_answer(region, current, previous, deltas, missing)
+    if question_type == "overall_change":
+        return _overall_change_answer(region, current, previous, deltas, missing)
+    if question_type == "exposure_lookup":
+        return _exposure_lookup_answer(region, current)
+    if question_type == "inspection_priority":
+        recommendations = payload.get("recommendations") or []
+        first = str(recommendations[0]) if recommendations else "inspect the densest active hotspot cluster first"
+        return (
+            f"For {region}, inspect this first: {first}. This is based on the latest run drivers and spatial exposure "
+            "evidence."
+        )
+    if question_type == "risk_explanation":
+        drivers = _driver_names(current)
+        risk = _risk_text(current)
+        return (
+            f"{region} is {risk}. The leading drivers are {drivers}, supported by the latest hotspot, weather, "
+            "spatial, and Elastic evidence."
+        )
+    return f"{region} is {_risk_text(current)} based on the latest completed analysis run."
+
+
+def _wind_change_answer(
+    region: str,
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+    deltas: dict[str, Any],
+    missing: list[str],
+) -> str:
+    current_wind = current.get("weather", {}).get("wind_gust_kmh")
+    delta = deltas.get("wind_gust_kmh")
+    if missing or not previous or not delta:
+        missing_text = ", ".join(missing or ["yesterday wind baseline"])
+        current_text = f" Current wind gust evidence is {current_wind} km/h." if current_wind is not None else ""
+        return (
+            f"I cannot calculate how wind changed since yesterday for {region} because {missing_text} is "
+            f"missing.{current_text}"
+        )
+    return (
+        f"Wind changed since yesterday in {region}: gusts are {delta['current']:g} km/h now versus "
+        f"{delta['previous']:g} km/h previously, a {delta['delta']:+g} km/h change."
+    )
+
+
+def _weather_change_answer(
+    region: str,
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+    deltas: dict[str, Any],
+    missing: list[str],
+) -> str:
+    if missing or not previous:
+        missing_text = ", ".join(missing or ["yesterday matched completed analysis run"])
+        weather = current.get("weather", {})
+        return (
+            f"I cannot calculate weather change since yesterday for {region} because {missing_text} is missing. "
+            f"Current evidence shows wind gusts {weather.get('wind_gust_kmh', 'unknown')} km/h, "
+            f"minimum humidity {weather.get('humidity_min', 'unknown')}%, and seven-day rainfall "
+            f"{weather.get('rainfall_7d', 'unknown')} mm."
+        )
+    wind = deltas.get("wind_gust_kmh")
+    humidity = deltas.get("humidity_min")
+    parts = []
+    if wind:
+        parts.append(f"wind gusts {wind['delta']:+g} km/h")
+    if humidity:
+        parts.append(f"minimum humidity {humidity['delta']:+g} points")
+    return (
+        f"Weather changed since yesterday in {region}: "
+        f"{', '.join(parts) or 'no comparable weather deltas were available'}."
+    )
+
+
+def _overall_change_answer(
+    region: str,
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+    deltas: dict[str, Any],
+    missing: list[str],
+) -> str:
+    if missing or not previous:
+        missing_text = ", ".join(missing or ["yesterday matched completed analysis run"])
+        return (
+            f"I cannot compute what changed since yesterday for {region} because {missing_text} is missing. "
+            f"The current run shows {_risk_text(current)} with leading drivers {_driver_names(current)}."
+        )
+    risk_delta = deltas.get("risk_score")
+    hotspot_delta = deltas.get("hotspot_count_24h")
+    parts = []
+    if risk_delta:
+        parts.append(f"risk score {risk_delta['previous']:g} -> {risk_delta['current']:g} ({risk_delta['delta']:+g})")
+    if hotspot_delta:
+        parts.append(
+            f"24h hotspots {hotspot_delta['previous']:g} -> {hotspot_delta['current']:g} ({hotspot_delta['delta']:+g})"
+        )
+    return f"Since yesterday in {region}, {', '.join(parts) or 'no comparable numeric deltas were available'}."
+
+
+def _exposure_lookup_answer(region: str, current: dict[str, Any]) -> str:
+    spatial = current.get("spatial", {})
+    critical_assets = [str(item) for item in spatial.get("critical_assets", [])]
+    protected_areas = [str(item) for item in spatial.get("protected_areas", [])]
+    critical_text = _format_items(critical_assets, "no named critical assets returned")
+    protected_text = _format_items(protected_areas, "no named protected or park areas returned")
+    return (
+        f"For {region}, spatial evidence returned {spatial.get('critical_asset_count', 0)} critical assets and "
+        f"{spatial.get('protected_area_count', 0)} protected or park areas. Critical assets: {critical_text}. "
+        f"Protected/park areas: {protected_text}. The current exposure tool does not enumerate named road corridors or "
+        "town/settlement assets, so I will not claim specific roads or towns from this evidence."
+    )
+
+
+def _risk_text(current: dict[str, Any]) -> str:
+    level = current.get("risk_level") or "unknown risk"
+    score = current.get("risk_score")
+    return f"{level} at {score}/100" if score is not None else str(level)
+
+
+def _driver_names(current: dict[str, Any]) -> str:
+    drivers = current.get("drivers", [])
+    names = [str(item.get("factor")) for item in drivers if isinstance(item, dict) and item.get("factor")]
+    return ", ".join(names[:3]) if names else "no dominant drivers"
+
+
+def _format_items(items: list[str], empty: str) -> str:
+    if not items:
+        return empty
+    visible = items[:5]
+    suffix = f", plus {len(items) - len(visible)} more" if len(items) > len(visible) else ""
+    return "; ".join(visible) + suffix
 
 
 def _lookup_store_item(items: dict[str, Any], key: Any) -> Any | None:

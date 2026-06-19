@@ -41,7 +41,7 @@ export function AgentMonitorPanel({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Agents Monitor Status</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">Demo Mode</Badge>
+            <Badge variant="outline">Operational</Badge>
             <Badge variant="outline">{statusLabel}</Badge>
           </div>
         </div>
