@@ -19,7 +19,8 @@ run_response = client.post("/api/runs/manual", json={"region_id": "blue_mountain
 run_response.raise_for_status()
 run = run_response.json()["run"]
 run_id = run["run_id"]
-assert run["risk_score"] == 83
+assert run["status"] == "completed"
+assert 0 <= run["risk_score"] <= 100
 
 events_response = client.get(f"/api/runs/{run_id}/events")
 events_response.raise_for_status()

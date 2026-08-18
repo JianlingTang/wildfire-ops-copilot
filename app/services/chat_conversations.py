@@ -46,7 +46,7 @@ def completed_run_for_request(request: ChatRequest, conversation: ConversationRe
 
 
 def should_block_for_analysis(intent: str, request: ChatRequest, conversation: ConversationRecord) -> bool:
-    if intent in {"ANALYZE_AND_REPORT", "QUESTION"}:
+    if intent in {"ANALYZE_AND_REPORT", "CALCULATION", "KNOWLEDGE_REQUIRED", "MEMORY_LOOKUP", "QUESTION"}:
         return False
     return completed_run_for_request(request, conversation) is None
 

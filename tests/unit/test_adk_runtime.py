@@ -44,7 +44,7 @@ class FakeRunner:
     ) -> None:
         self.session_service = session_service
         self.last_intent = last_intent
-        self.payload = payload or {"status": "success", "mode": "adk", "answer": "placeholder"}
+        self.payload = payload or {"status": "success", "mode": "adk", "answer": "Deterministic tool result"}
         self.called = False
 
     async def run_async(self, *, user_id: str, session_id: str, new_message, state_delta=None, **kwargs):
@@ -66,6 +66,54 @@ class FakeRunner:
             }
         )
         yield FakeEvent("LLM operator summary")
+
+
+def test_adk_runtime_blocks_out_of_scope_before_vertex_or_conversation(monkeypatch) -> None:
+    def fail_if_called():
+        raise AssertionError("Vertex setup must not run for out-of-scope requests")
+
+    monkeypatch.setattr("app.runtime.adk._ensure_vertex_configuration", fail_if_called)
+    monkeypatch.setattr("app.runtime.adk._get_runner", fail_if_called)
+
+    result = AdkRuntime().route_chat(ChatRequest(message="Write a wedding poem about Paris."))
+
+    assert result["intent"] == "OUT_OF_SCOPE"
+    assert result["response"]["llm_called"] is False
+    assert result["timing_trace"]["steps"][0]["name"] == "scope_gate"
+    assert not store.conversations
+
+
+def test_adk_runtime_preserves_safe_knowledge_handoff_instead_of_final_text(monkeypatch) -> None:
+    session_service = FakeSessionService()
+    runner = FakeRunner(
+        session_service,
+        last_intent="KNOWLEDGE_REQUIRED",
+        payload={
+            "status": "knowledge_required",
+            "mode": "adk",
+            "answer": "Verified document retrieval is required; no model-memory answer was generated.",
+            "requires_rag": True,
+            "tool_trace": [
+                {
+                    "called": "RAG Evidence Gate",
+                    "did": "Required verified retrieval.",
+                    "output": "RAG handoff",
+                    "mode": "adk",
+                    "status": "blocked",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr("app.runtime.adk._ensure_vertex_configuration", lambda: None)
+    monkeypatch.setattr("app.runtime.adk._get_session_service", lambda: session_service)
+    monkeypatch.setattr("app.runtime.adk._get_runner", lambda: runner)
+
+    result = AdkRuntime().route_chat(ChatRequest(message="What does the wildfire evacuation policy require?"))
+
+    assert result["intent"] == "KNOWLEDGE_REQUIRED"
+    assert result["response"]["requires_rag"] is True
+    assert "Verified document retrieval" in result["response"]["answer"]
+    assert result["response"]["answer"] != "LLM operator summary"
 
 
 def test_adk_runtime_builds_dashboard_payload_from_session_state_for_freeform_question(monkeypatch) -> None:
@@ -104,13 +152,13 @@ def test_adk_runtime_builds_dashboard_payload_from_session_state_for_freeform_qu
 
     assert result["intent"] == "ANALYZE_AND_REPORT"
     assert result["mode"] == "adk"
-    assert result["response"]["answer"] == "LLM operator summary"
+    assert result["response"]["answer"] == "Deterministic tool result"
     assert result["run"].run_id == "run_test"
     assert result["report"].report_id == "report_test"
     assert result["alert"].alert_id == "alert_test"
 
 
-def test_adk_runtime_falls_back_locally_when_runner_fails_for_freeform_question(monkeypatch) -> None:
+def test_adk_runtime_refuses_to_answer_when_router_fails(monkeypatch) -> None:
     class BrokenRunner:
         async def run_async(self, **kwargs):
             del kwargs
@@ -129,8 +177,8 @@ def test_adk_runtime_falls_back_locally_when_runner_fails_for_freeform_question(
     )
 
     assert result["mode"] == "adk"
-    assert result["response"]["status"] == "success"
-    assert "Australia Live Hotspot AOI" in result["response"]["answer"]
+    assert result["response"]["status"] == "error"
+    assert "runtime failed" in result["response"]["answer"]
     assert any(step["status"] == "failed" for step in result["timing_trace"]["steps"])
 
 
@@ -192,7 +240,7 @@ def test_adk_runtime_retries_429_resource_exhausted(monkeypatch) -> None:
     assert delays == [0.25]
     assert result["intent"] == "ANALYST_QA"
     assert result["response"]["status"] == "success"
-    assert result["response"]["answer"] == "LLM retry answer"
+    assert result["response"]["answer"] == "Inspect the focused AOI first after retry."
 
 
 def test_public_intent_prefers_deterministic_classifier_for_known_workflows() -> None:
@@ -354,11 +402,11 @@ def test_adk_runtime_keeps_valid_wind_synthesis(monkeypatch) -> None:
     )
 
     assert result["intent"] == "WIND_CHANGE"
-    assert result["response"]["synthesis_source"] == "validator"
-    assert "current wind gust evidence is missing" in result["response"]["answer"]
+    assert result["response"]["synthesis_source"] == "llm"
+    assert "yesterday baseline is missing" in result["response"]["answer"]
 
 
-def test_adk_runtime_allows_no_tool_context_answer(monkeypatch) -> None:
+def test_adk_runtime_rejects_no_tool_context_answer(monkeypatch) -> None:
     class ContextOnlyRunner:
         def __init__(self, session_service: FakeSessionService) -> None:
             self.session_service = session_service
@@ -390,10 +438,10 @@ def test_adk_runtime_allows_no_tool_context_answer(monkeypatch) -> None:
         )
     )
 
-    assert result["intent"] == "CONTEXT_ANSWER"
-    assert result["response"]["status"] == "success"
-    assert "No external tools" in result["response"]["answer"]
-    assert result["response"]["tool_trace"][0]["called"] == "Context JSON"
+    assert result["intent"] == "ROUTING_FAILED"
+    assert result["response"]["status"] == "error"
+    assert "model memory" in result["response"]["answer"]
+    assert result["response"]["tool_trace"][0]["called"] == "Main Coordinator"
 
 
 def test_operational_context_message_includes_context_json() -> None:
@@ -492,7 +540,7 @@ def test_adk_runtime_action_intent_falls_back_when_llm_does_not_call_tool(monkey
     assert len(store.actions) == 1
 
 
-def test_adk_runtime_repairs_operational_question_when_first_turn_has_no_llm_answer(monkeypatch) -> None:
+def test_adk_runtime_does_not_repair_with_a_freeform_answer_when_tool_is_missing(monkeypatch) -> None:
     class NoToolRunner:
         def __init__(self, session_service: FakeSessionService) -> None:
             self.session_service = session_service
@@ -537,12 +585,11 @@ def test_adk_runtime_repairs_operational_question_when_first_turn_has_no_llm_ans
         )
     )
 
-    assert runner.called is False
-    assert runner.call_count == 0
-    assert result["intent"] == "OPERATIONAL_PRIORITIZATION"
-    assert result["response"]["status"] == "success"
-    assert "Inspect first" in result["response"]["answer"]
-    assert result["response"]["synthesis_source"] == "validator"
+    assert runner.called is True
+    assert runner.call_count == 1
+    assert result["intent"] == "ROUTING_FAILED"
+    assert result["response"]["status"] == "error"
+    assert "model memory" in result["response"]["answer"]
 
 
 def test_adk_runtime_action_guardrail_creates_pending_approval_without_llm(monkeypatch) -> None:
@@ -648,8 +695,8 @@ def test_adk_runtime_operational_prioritization_does_not_trigger_analysis(monkey
         )
     )
 
-    assert runner.called is False
+    assert runner.called is True
     assert result["intent"] == "OPERATIONAL_PRIORITIZATION"
     assert result["response"]["status"] == "success"
-    assert "Inspect first" in result["response"]["answer"]
+    assert "focused AOI" in result["response"]["answer"]
     assert store.runs

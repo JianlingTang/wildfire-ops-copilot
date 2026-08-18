@@ -17,10 +17,13 @@ from app.services.chat_conversations import (
     prepare_conversation,
     should_block_for_analysis,
 )
+from app.services.conversation_memory import lookup_conversation_memory, memory_operation_for_message
+from app.services.deterministic_calculator import calculation_response_from_message
 from app.services.firestore_store import store
 from app.services.hotspot_visualization import build_hotspot_visualization
 from app.services.mixed_intents import build_exposure_action_response, is_exposure_action_request
 from app.services.monitoring_tasks import create_monitor_task_from_chat
+from app.services.request_scope import is_wildfire_operations_request, out_of_scope_response
 from app.services.risk_trend import build_risk_prediction_response, build_risk_trend_response
 
 
@@ -33,6 +36,8 @@ class MockDemoRuntime(AgentRuntime):
         return run_daily_intelligence(request, trigger_type="manual")
 
     def route_chat(self, request: ChatRequest) -> dict:
+        if not is_wildfire_operations_request(request):
+            return out_of_scope_response(mode="demo")
         conversation, request = prepare_conversation(request)
         trace_id = new_trace_id()
         intent = classify_intent(request.message)
@@ -59,6 +64,40 @@ class MockDemoRuntime(AgentRuntime):
         run = store.runs.get(request.run_id) if request.run_id else store.get_latest_run(request.region_id)
         if run is None and request.region_id == settings.demo_region_id:
             run = store.get_latest_run()
+
+        if intent == "MEMORY_LOOKUP":
+            operation = memory_operation_for_message(request.message)
+            if operation is None:
+                payload: dict = {
+                    "status": "invalid_input",
+                    "answer": "No supported deterministic memory lookup matched this request.",
+                    "memory": None,
+                    "tool_trace": [],
+                }
+            else:
+                payload = lookup_conversation_memory(request, operation)
+            payload["mode"] = "demo"
+            return finalize_chat_response(
+                request,
+                conversation,
+                {"intent": intent, "mode": "demo", "response": payload, "trace_id": trace_id},
+            )
+
+        if intent == "CALCULATION":
+            payload = calculation_response_from_message(request.message, mode="demo")
+            return finalize_chat_response(
+                request,
+                conversation,
+                {"intent": intent, "mode": "demo", "response": payload, "trace_id": trace_id},
+            )
+
+        if intent == "KNOWLEDGE_REQUIRED":
+            payload = _knowledge_required_response(request.message, mode="demo")
+            return finalize_chat_response(
+                request,
+                conversation,
+                {"intent": intent, "mode": "demo", "response": payload, "trace_id": trace_id},
+            )
 
         if is_exposure_action_request(request.message):
             response = build_exposure_action_response(request, run, mode="demo")
@@ -144,7 +183,7 @@ class MockDemoRuntime(AgentRuntime):
             payload = run_what_if(request.message, run, request.region_name, request.aoi)
             payload.setdefault(
                 "tool_trace",
-                _tool_trace_for_demo_question("What-if Agent", payload.get("answer", "scenario complete")),
+                _tool_trace_for_demo_question("What-if Agent", str(payload.get("answer") or "scenario complete")),
             )
             return finalize_chat_response(request, conversation, {
                 "intent": intent,
@@ -156,7 +195,7 @@ class MockDemoRuntime(AgentRuntime):
             payload = draft_action(request.message, run, request.user_id, request.region_name)
             payload.setdefault(
                 "tool_trace",
-                _tool_trace_for_demo_question("Action Workflow", payload.get("safety_note", "draft created")),
+                _tool_trace_for_demo_question("Action Workflow", str(payload.get("safety_note") or "draft created")),
             )
             _publish_artifact_event(
                 trace_id,
@@ -195,7 +234,8 @@ class MockDemoRuntime(AgentRuntime):
             )
         payload = answer_operational_question(request.message, run, request.region_name, request.aoi)
         payload.setdefault(
-            "tool_trace", _tool_trace_for_demo_question("Gemini Context Answer", payload.get("status", "success"))
+            "tool_trace",
+            _tool_trace_for_demo_question("Gemini Context Answer", str(payload.get("status") or "success")),
         )
         return finalize_chat_response(request, conversation, {
             "intent": intent,
@@ -272,6 +312,28 @@ def _operator_summary(run_record: RunRecord, report: dict, alert: dict | None) -
         f"The top recommendation is to {run_record.recommendations[0].lower()} "
         f"{report['title']} was generated and saved to the dashboard. {alert_sentence}"
     )
+
+
+def _knowledge_required_response(message: str, *, mode: str) -> dict:
+    return {
+        "status": "knowledge_required",
+        "mode": mode,
+        "answer": (
+            "This wildfire question requires verified document retrieval, but the production RAG pipeline is not "
+            "enabled in this phase. I will not answer from model memory."
+        ),
+        "requires_rag": True,
+        "query": message,
+        "tool_trace": [
+            {
+                "called": "Knowledge Retrieval Required",
+                "did": "Stopped before generation because no deterministic tool can answer the request.",
+                "output": "Verified document retrieval is required.",
+                "mode": mode,
+                "status": "blocked",
+            }
+        ],
+    }
 
 
 def _tool_trace_for_demo_question(agent: str, output: str) -> list[dict]:

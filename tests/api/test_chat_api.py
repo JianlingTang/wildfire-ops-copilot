@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.firestore_store import store
 
 
 def create_run(client: TestClient) -> str:
@@ -19,6 +20,19 @@ def create_selected_analysis(client: TestClient) -> dict:
         },
     )
     return response.json()
+
+
+def test_unrelated_question_is_blocked_before_conversation_or_llm() -> None:
+    client = TestClient(app)
+
+    response = client.post("/api/chat", json={"message": "Write a wedding poem about Paris."})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "OUT_OF_SCOPE"
+    assert payload["response"]["status"] == "blocked"
+    assert payload["response"]["llm_called"] is False
+    assert not store.conversations
 
 
 def test_routes_normal_question_to_analyst_path() -> None:
