@@ -123,7 +123,7 @@ def _active_aoi(request: ChatRequest, conversation: ConversationRecord) -> dict[
 
     run = _run_for_request(request, conversation)
     region_context = run.evidence.get("region_context") if run else None
-    if isinstance(region_context, dict):
+    if run is not None and isinstance(region_context, dict):
         value = _normalized_region_context(region_context, run)
         return _result(
             "ACTIVE_AOI",

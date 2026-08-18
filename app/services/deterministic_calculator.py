@@ -57,7 +57,7 @@ def calculation_request_from_message(message: str) -> tuple[CalculationOperation
 def calculation_response_from_message(message: str, *, mode: str) -> dict[str, Any]:
     request = calculation_request_from_message(message)
     if request is None:
-        payload = {
+        payload: dict[str, Any] = {
             "status": "invalid_input",
             "mode": mode,
             "answer": "No supported deterministic calculation could be extracted from the request.",

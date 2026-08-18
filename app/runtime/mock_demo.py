@@ -68,7 +68,7 @@ class MockDemoRuntime(AgentRuntime):
         if intent == "MEMORY_LOOKUP":
             operation = memory_operation_for_message(request.message)
             if operation is None:
-                payload = {
+                payload: dict = {
                     "status": "invalid_input",
                     "answer": "No supported deterministic memory lookup matched this request.",
                     "memory": None,
@@ -183,7 +183,7 @@ class MockDemoRuntime(AgentRuntime):
             payload = run_what_if(request.message, run, request.region_name, request.aoi)
             payload.setdefault(
                 "tool_trace",
-                _tool_trace_for_demo_question("What-if Agent", payload.get("answer", "scenario complete")),
+                _tool_trace_for_demo_question("What-if Agent", str(payload.get("answer") or "scenario complete")),
             )
             return finalize_chat_response(request, conversation, {
                 "intent": intent,
@@ -195,7 +195,7 @@ class MockDemoRuntime(AgentRuntime):
             payload = draft_action(request.message, run, request.user_id, request.region_name)
             payload.setdefault(
                 "tool_trace",
-                _tool_trace_for_demo_question("Action Workflow", payload.get("safety_note", "draft created")),
+                _tool_trace_for_demo_question("Action Workflow", str(payload.get("safety_note") or "draft created")),
             )
             _publish_artifact_event(
                 trace_id,
@@ -234,7 +234,8 @@ class MockDemoRuntime(AgentRuntime):
             )
         payload = answer_operational_question(request.message, run, request.region_name, request.aoi)
         payload.setdefault(
-            "tool_trace", _tool_trace_for_demo_question("Gemini Context Answer", payload.get("status", "success"))
+            "tool_trace",
+            _tool_trace_for_demo_question("Gemini Context Answer", str(payload.get("status") or "success")),
         )
         return finalize_chat_response(request, conversation, {
             "intent": intent,
