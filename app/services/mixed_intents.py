@@ -16,12 +16,8 @@ def is_exposure_action_request(message: str) -> bool:
         "roads",
         "exposure",
         "exposed",
-        "within",
-        "inside",
-        "nearby",
-        "aoi",
-        "roi",
-        "area",
+        "protected area",
+        "protected areas",
     ]
     action_terms = ["generate", "create", "draft", "issue", "publish", "send", "alert", "advisory", "avoid"]
     public_safety_terms = ["alert", "advisory", "avoid", "warning", "people", "public"]

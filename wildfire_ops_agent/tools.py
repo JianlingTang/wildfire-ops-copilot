@@ -10,9 +10,13 @@ from app.agents.specialists.what_if_agent import run_what_if
 from app.agents.workflows.action_workflow import draft_action
 from app.models.schemas import Aoi, ChatRequest
 from app.runtime.analysis import execute_analysis_request
+from app.services.deterministic_calculator import CalculationOperation, calculate
+from app.services.conversation_memory import MemoryOperation, lookup_conversation_memory
 from app.services.firestore_store import store
 from app.services.hotspot_visualization import build_hotspot_visualization
+from app.services.mixed_intents import build_exposure_action_response
 from app.services.monitoring_tasks import create_monitor_task_from_chat
+from app.services.risk_trend import build_risk_prediction_response, build_risk_trend_response
 
 
 def analyze_and_report_tool(
@@ -226,6 +230,185 @@ def analyst_question_tool(
     return payload
 
 
+def deterministic_calculation_tool(
+    user_request: str,
+    operation: CalculationOperation,
+    values: list[float],
+    tool_context: ToolContext,
+) -> dict[str, Any]:
+    """Deterministic Calculator: execute an audited arithmetic or AOI-area calculation in Python."""
+    try:
+        result = calculate(operation, values)
+        payload: dict[str, Any] = {
+            "status": "success",
+            "mode": "adk",
+            "answer": f"Deterministic calculation result: {result:.6g}.",
+            "calculation": {
+                "operation": operation,
+                "values": values,
+                "result": result,
+                "implementation": "python",
+            },
+            "tool_trace": [
+                _trace_item(
+                    "Deterministic Python Calculator",
+                    f"Executed {operation} without model arithmetic.",
+                    result,
+                )
+            ],
+        }
+    except ValueError as exc:
+        payload = {
+            "status": "invalid_input",
+            "mode": "adk",
+            "answer": f"The deterministic calculation could not run: {exc}.",
+            "calculation": {"operation": operation, "values": values},
+            "tool_trace": [
+                _trace_item(
+                    "Deterministic Python Calculator",
+                    f"Rejected invalid {operation} inputs.",
+                    exc,
+                    status="failed",
+                )
+            ],
+        }
+    payload["user_request"] = user_request
+    payload["tool_summary"] = payload["tool_trace"][-1]
+    _stash_result(tool_context, intent="CALCULATION", payload=payload)
+    return payload
+
+
+def conversation_memory_lookup_tool(
+    user_request: str,
+    operation: MemoryOperation,
+    tool_context: ToolContext,
+) -> dict[str, Any]:
+    """Conversation Memory Tool: read exact prior-question, AOI, report, or action state without model inference."""
+    request = _chat_request_from_context(tool_context, user_request)
+    payload = lookup_conversation_memory(request, operation)
+    payload["mode"] = "adk"
+    payload["tool_summary"] = payload["tool_trace"][-1]
+    _stash_result(tool_context, intent="MEMORY_LOOKUP", payload=payload, run_id=request.run_id)
+    return payload
+
+
+def risk_trend_tool(
+    user_request: str,
+    tool_context: ToolContext,
+    region_name: str | None = None,
+    region_id: str | None = None,
+    aoi_center: list[float] | None = None,
+    radius_km: float | None = None,
+    run_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Risk Trend Tool: build the deterministic analysis risk timeseries and chart."""
+    request = _chat_request_from_context(
+        tool_context,
+        user_request,
+        region_name=region_name,
+        region_id=region_id,
+        aoi_center=aoi_center,
+        radius_km=radius_km,
+        run_id=run_id,
+        user_id=user_id,
+    )
+    run = _resolve_run(tool_context)
+    payload = build_risk_trend_response(request, run, mode="adk")
+    payload["tool_summary"] = payload["tool_trace"][-1]
+    _stash_result(tool_context, intent="RISK_TREND", payload=payload, run_id=run.run_id if run else None)
+    return payload
+
+
+def risk_prediction_tool(
+    user_request: str,
+    tool_context: ToolContext,
+    region_name: str | None = None,
+    region_id: str | None = None,
+    aoi_center: list[float] | None = None,
+    radius_km: float | None = None,
+    run_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Risk Prediction Tool: build the deterministic +5 day risk forecast artifact."""
+    request = _chat_request_from_context(
+        tool_context,
+        user_request,
+        region_name=region_name,
+        region_id=region_id,
+        aoi_center=aoi_center,
+        radius_km=radius_km,
+        run_id=run_id,
+        user_id=user_id,
+    )
+    run = _resolve_run(tool_context)
+    payload = build_risk_prediction_response(request, run, mode="adk")
+    payload["tool_summary"] = payload["tool_trace"][-1]
+    _stash_result(tool_context, intent="RISK_PREDICTION", payload=payload, run_id=run.run_id if run else None)
+    return payload
+
+
+def exposure_action_tool(
+    user_request: str,
+    tool_context: ToolContext,
+    region_name: str | None = None,
+    region_id: str | None = None,
+    aoi_center: list[float] | None = None,
+    radius_km: float | None = None,
+    run_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Exposure + Action Tool: look up exposure then create one approval-gated public-safety draft."""
+    request = _chat_request_from_context(
+        tool_context,
+        user_request,
+        region_name=region_name,
+        region_id=region_id,
+        aoi_center=aoi_center,
+        radius_km=radius_km,
+        run_id=run_id,
+        user_id=user_id,
+    )
+    run = _resolve_run(tool_context)
+    response = build_exposure_action_response(request, run, mode="adk")
+    payload = response["response"]
+    payload["tool_summary"] = payload["tool_trace"][-1]
+    action = payload.get("action") or {}
+    _stash_result(
+        tool_context,
+        intent="EXPOSURE_ACTION",
+        payload=payload,
+        run_id=run.run_id if run else None,
+        action_id=action.get("action_id"),
+    )
+    return payload
+
+
+def knowledge_retrieval_required_tool(user_request: str, tool_context: ToolContext) -> dict[str, Any]:
+    """RAG Handoff: refuse unsupported knowledge answers until evidence retrieval is implemented."""
+    payload: dict[str, Any] = {
+        "status": "knowledge_required",
+        "mode": "adk",
+        "answer": (
+            "This wildfire question requires verified document retrieval, but the production RAG pipeline is not "
+            "enabled in this phase. I will not answer from model memory."
+        ),
+        "requires_rag": True,
+        "query": user_request,
+        "tool_trace": [
+            _trace_item(
+                "Knowledge Retrieval Required",
+                "Stopped before generation because no deterministic tool can answer the request.",
+                "Verified document retrieval is required.",
+                status="blocked",
+            )
+        ],
+    }
+    payload["tool_summary"] = payload["tool_trace"][-1]
+    _stash_result(tool_context, intent="KNOWLEDGE_REQUIRED", payload=payload)
+    return payload
+
+
 def hotspot_visualization_tool(
     user_request: str,
     tool_context: ToolContext,
@@ -308,6 +491,7 @@ def _chat_request_from_context(
         aoi = Aoi(center=(float(center[0]), float(center[1])), radius_km=float(effective_radius_km))
     return ChatRequest(
         message=message,
+        conversation_id=_normalize_optional_str(tool_context.state.get("app:conversation_id")),
         run_id=_normalize_optional_str(run_id or tool_context.state.get("app:run_id")),
         region_id=str(region_id or tool_context.state.get("app:region_id", "live_australia")),
         region_name=_normalize_optional_str(region_name or tool_context.state.get("app:region_name")),

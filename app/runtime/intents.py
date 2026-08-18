@@ -1,6 +1,12 @@
 def classify_intent(message: str) -> str:
     lowered = message.lower()
 
+    if _is_memory_lookup(lowered):
+        return "MEMORY_LOOKUP"
+    if _is_calculation_request(lowered):
+        return "CALCULATION"
+    if _is_knowledge_required(lowered):
+        return "KNOWLEDGE_REQUIRED"
     if _is_visualization_request(lowered):
         return "HOTSPOT_VISUALIZATION"
     if _is_monitor_task(lowered):
@@ -30,6 +36,36 @@ def classify_intent(message: str) -> str:
     if "inspect" in lowered or "first" in lowered or "priority" in lowered:
         return "OPERATIONAL_PRIORITIZATION"
     return "QUESTION"
+
+
+def _is_memory_lookup(lowered: str) -> bool:
+    question_phrases = ["my last question", "my previous question", "what did i ask", "what was i asking"]
+    aoi_phrases = ["my selected aoi", "my current aoi", "selected area", "current area", "active aoi"]
+    report_aoi = (
+        "report" in lowered
+        and any(term in lowered for term in ["aoi", "area", "region"])
+        and any(term in lowered for term in ["my", "last", "previous", "what", "which"])
+    )
+    action_status = any(term in lowered for term in ["action", "advisory", "draft"]) and any(
+        term in lowered for term in ["status", "state", "approved", "pending"]
+    )
+    return any(phrase in lowered for phrase in [*question_phrases, *aoi_phrases]) or report_aoi or action_status
+
+
+def _is_calculation_request(lowered: str) -> bool:
+    if not any(term in lowered for term in ["calculate", "compute", "what is"]):
+        return False
+    if "percent change" in lowered and any(term in lowered for term in ["risk", "wildfire", "fire"]):
+        return True
+    return any(term in lowered for term in ["aoi", "wildfire", "fire"]) and any(
+        term in lowered for term in ["area", "square kilometre", "square kilometer", "km2"]
+    )
+
+
+def _is_knowledge_required(lowered: str) -> bool:
+    knowledge_terms = ["policy", "procedure", "sop", "guidance", "require", "mandatory", "approval form"]
+    domain_terms = ["wildfire", "bushfire", "fire", "evacuation", "prescribed-burn", "prescribed burn"]
+    return any(term in lowered for term in knowledge_terms) and any(term in lowered for term in domain_terms)
 
 
 def _is_visualization_request(lowered: str) -> bool:
@@ -115,6 +151,10 @@ def _is_analyze_and_report(lowered: str) -> bool:
         return True
 
     phrases = [
+        "analyze this wildfire aoi",
+        "analyse this wildfire aoi",
+        "analyze this aoi",
+        "analyse this aoi",
         "analyze this region",
         "analyse this region",
         "analyze blue mountains",
