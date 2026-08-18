@@ -10,8 +10,8 @@ from app.agents.specialists.what_if_agent import run_what_if
 from app.agents.workflows.action_workflow import draft_action
 from app.models.schemas import Aoi, ChatRequest
 from app.runtime.analysis import execute_analysis_request
-from app.services.deterministic_calculator import CalculationOperation, calculate
 from app.services.conversation_memory import MemoryOperation, lookup_conversation_memory
+from app.services.deterministic_calculator import CalculationOperation, calculate
 from app.services.firestore_store import store
 from app.services.hotspot_visualization import build_hotspot_visualization
 from app.services.mixed_intents import build_exposure_action_response

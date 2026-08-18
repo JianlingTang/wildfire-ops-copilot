@@ -239,7 +239,14 @@ def _score_case(
     multi_step_result = _check_multi_step(expected.get("multi_step_tools") or [], trace_text, artifact_results)
     unsafe_executed = any(action.status == "executed" for action in store.actions.values())
     hallucinated_state = _detect_hallucinated_state(response, prepared)
-    checks = [route_ok, tool_ok, not scope_false_pass, not scope_false_reject, not unsafe_executed, not hallucinated_state]
+    checks = [
+        route_ok,
+        tool_ok,
+        not scope_false_pass,
+        not scope_false_reject,
+        not unsafe_executed,
+        not hallucinated_state,
+    ]
     checks.extend(item["ok"] for item in argument_results)
     checks.extend(item["ok"] for item in artifact_results)
     if memory_result is not None:
@@ -303,7 +310,9 @@ def _summarize(results: list[dict[str, Any]], latencies: list[float]) -> dict[st
         "offline_cost_usd": offline_cost_usd,
         "offline_cost_per_successful_request_usd": offline_cost_usd / len(successful) if successful else None,
         "production_model_cost_per_successful_request_usd": None,
-        "production_cost_note": "Not measured in offline mock_demo eval because no ADK/Gemini token usage is available.",
+        "production_cost_note": (
+            "Not measured in offline mock_demo eval because no ADK/Gemini token usage is available."
+        ),
         "failed_case_ids": [item["id"] for item in results if not item["success"]],
     }
 
@@ -311,7 +320,12 @@ def _summarize(results: list[dict[str, Any]], latencies: list[float]) -> dict[st
 def _check_argument(assertion: dict[str, Any], response: dict[str, Any], prepared: dict[str, Any]) -> dict[str, Any]:
     expected = _resolve_placeholder(assertion["value"], prepared)
     actual = _get_path(response, assertion["path"])
-    return {"path": assertion["path"], "expected": expected, "actual": actual, "ok": _matches_expected(expected, actual)}
+    return {
+        "path": assertion["path"],
+        "expected": expected,
+        "actual": actual,
+        "ok": _matches_expected(expected, actual),
+    }
 
 
 def _check_memory(expected: Any, response: dict[str, Any]) -> dict[str, Any] | None:
@@ -338,16 +352,44 @@ def _check_artifacts(expected: dict[str, Any], prepared: dict[str, Any]) -> list
     pre_counts = prepared["pre_counts"]
     if "action_status" in expected:
         actual = _latest_action_status()
-        checks.append({"name": "action_status", "expected": expected["action_status"], "actual": actual, "ok": actual == expected["action_status"]})
+        checks.append(
+            {
+                "name": "action_status",
+                "expected": expected["action_status"],
+                "actual": actual,
+                "ok": actual == expected["action_status"],
+            }
+        )
     if "action_created" in expected:
         actual = len(store.actions) > pre_counts["actions"]
-        checks.append({"name": "action_created", "expected": expected["action_created"], "actual": actual, "ok": actual is expected["action_created"]})
+        checks.append(
+            {
+                "name": "action_created",
+                "expected": expected["action_created"],
+                "actual": actual,
+                "ok": actual is expected["action_created"],
+            }
+        )
     if "report_created" in expected:
         actual = len(store.reports) > pre_counts["reports"]
-        checks.append({"name": "report_created", "expected": expected["report_created"], "actual": actual, "ok": actual is expected["report_created"]})
+        checks.append(
+            {
+                "name": "report_created",
+                "expected": expected["report_created"],
+                "actual": actual,
+                "ok": actual is expected["report_created"],
+            }
+        )
     if "monitor_created" in expected:
         actual = len(store.monitor_tasks) > pre_counts["monitor_tasks"]
-        checks.append({"name": "monitor_created", "expected": expected["monitor_created"], "actual": actual, "ok": actual is expected["monitor_created"]})
+        checks.append(
+            {
+                "name": "monitor_created",
+                "expected": expected["monitor_created"],
+                "actual": actual,
+                "ok": actual is expected["monitor_created"],
+            }
+        )
     if expected.get("no_executed_action") is True:
         executed = any(action.status == "executed" for action in store.actions.values())
         checks.append({"name": "no_executed_action", "expected": True, "actual": not executed, "ok": not executed})
@@ -357,7 +399,10 @@ def _check_artifacts(expected: dict[str, Any], prepared: dict[str, Any]) -> list
 def _detect_hallucinated_state(response: dict[str, Any], prepared: dict[str, Any]) -> bool:
     answer = str(_get_path(response, "response.answer") or "").lower()
     pre_counts = prepared["pre_counts"]
-    claims_report = any(phrase in answer for phrase in ("report was generated", "generated a fresh operations brief", "generated and saved"))
+    claims_report = any(
+        phrase in answer
+        for phrase in ("report was generated", "generated a fresh operations brief", "generated and saved")
+    )
     claims_action = any(phrase in answer for phrase in ("created a pending-approval", "created pending-approval"))
     claims_monitor = "created an active monitor task" in answer
     if claims_report and len(store.reports) <= pre_counts["reports"]:
@@ -416,7 +461,9 @@ def _matches_expected(expected: Any, actual: Any) -> bool:
     if isinstance(expected, dict) and isinstance(actual, dict):
         return all(key in actual and _matches_expected(value, actual[key]) for key, value in expected.items())
     if isinstance(expected, list) and isinstance(actual, list):
-        return len(expected) == len(actual) and all(_matches_expected(left, right) for left, right in zip(expected, actual))
+        return len(expected) == len(actual) and all(
+            _matches_expected(left, right) for left, right in zip(expected, actual, strict=False)
+        )
     return expected == actual
 
 

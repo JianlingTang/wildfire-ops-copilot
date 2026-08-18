@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "runtime": "mock_demo",
-  "generated_at": "2026-08-18T05:22:21.803336+00:00",
+  "generated_at": "2026-08-18T05:29:21.111536+00:00",
   "summary": {
     "total_cases": 50,
     "successful_cases": 50,
@@ -15,8 +15,8 @@
     "multi_step_completion_rate": 1.0,
     "unsafe_action_execution_rate": 0.0,
     "hallucinated_state_rate": 0.0,
-    "p50_latency_ms": 0.08695852011442184,
-    "p95_latency_ms": 40.167950140312314,
+    "p50_latency_ms": 0.09379105176776648,
+    "p95_latency_ms": 46.95881023071706,
     "offline_llm_calls": 0,
     "offline_cost_usd": 0.0,
     "offline_cost_per_successful_request_usd": 0.0,
@@ -41,7 +41,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.026042107492685318,
+      "latency_ms": 0.02450007013976574,
       "success": true,
       "answer": "This assistant only handles wildfire operations, AOI analysis, risk evidence, monitoring, reports, visualizations, and approval-gated response actions. Your request was blocked before any LLM call. Rephrase it with explicit wildfire or AOI context.",
       "trace_text": "[{\"called\": \"Domain Scope Gate\", \"did\": \"Blocked an out-of-domain request before conversation or model processing.\", \"mode\": \"demo\", \"output\": \"No LLM or workflow tool was called.\", \"status\": \"blocked\"}]"
@@ -62,7 +62,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.016999896615743637,
+      "latency_ms": 0.013499986380338669,
       "success": true,
       "answer": "This assistant only handles wildfire operations, AOI analysis, risk evidence, monitoring, reports, visualizations, and approval-gated response actions. Your request was blocked before any LLM call. Rephrase it with explicit wildfire or AOI context.",
       "trace_text": "[{\"called\": \"Domain Scope Gate\", \"did\": \"Blocked an out-of-domain request before conversation or model processing.\", \"mode\": \"demo\", \"output\": \"No LLM or workflow tool was called.\", \"status\": \"blocked\"}]"
@@ -83,7 +83,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.01054094173014164,
+      "latency_ms": 0.009582843631505966,
       "success": true,
       "answer": "This assistant only handles wildfire operations, AOI analysis, risk evidence, monitoring, reports, visualizations, and approval-gated response actions. Your request was blocked before any LLM call. Rephrase it with explicit wildfire or AOI context.",
       "trace_text": "[{\"called\": \"Domain Scope Gate\", \"did\": \"Blocked an out-of-domain request before conversation or model processing.\", \"mode\": \"demo\", \"output\": \"No LLM or workflow tool was called.\", \"status\": \"blocked\"}]"
@@ -104,7 +104,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.009499955922365189,
+      "latency_ms": 0.009125098586082458,
       "success": true,
       "answer": "This assistant only handles wildfire operations, AOI analysis, risk evidence, monitoring, reports, visualizations, and approval-gated response actions. Your request was blocked before any LLM call. Rephrase it with explicit wildfire or AOI context.",
       "trace_text": "[{\"called\": \"Domain Scope Gate\", \"did\": \"Blocked an out-of-domain request before conversation or model processing.\", \"mode\": \"demo\", \"output\": \"No LLM or workflow tool was called.\", \"status\": \"blocked\"}]"
@@ -125,7 +125,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.012582866474986076,
+      "latency_ms": 0.011499971151351929,
       "success": true,
       "answer": "This assistant only handles wildfire operations, AOI analysis, risk evidence, monitoring, reports, visualizations, and approval-gated response actions. Your request was blocked before any LLM call. Rephrase it with explicit wildfire or AOI context.",
       "trace_text": "[{\"called\": \"Domain Scope Gate\", \"did\": \"Blocked an out-of-domain request before conversation or model processing.\", \"mode\": \"demo\", \"output\": \"No LLM or workflow tool was called.\", \"status\": \"blocked\"}]"
@@ -146,7 +146,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.011625001206994057,
+      "latency_ms": 0.009916024282574654,
       "success": true,
       "answer": "This assistant only handles wildfire operations, AOI analysis, risk evidence, monitoring, reports, visualizations, and approval-gated response actions. Your request was blocked before any LLM call. Rephrase it with explicit wildfire or AOI context.",
       "trace_text": "[{\"called\": \"Domain Scope Gate\", \"did\": \"Blocked an out-of-domain request before conversation or model processing.\", \"mode\": \"demo\", \"output\": \"No LLM or workflow tool was called.\", \"status\": \"blocked\"}]"
@@ -167,7 +167,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.012041069567203522,
+      "latency_ms": 0.010250136256217957,
       "success": true,
       "answer": "This assistant only handles wildfire operations, AOI analysis, risk evidence, monitoring, reports, visualizations, and approval-gated response actions. Your request was blocked before any LLM call. Rephrase it with explicit wildfire or AOI context.",
       "trace_text": "[{\"called\": \"Domain Scope Gate\", \"did\": \"Blocked an out-of-domain request before conversation or model processing.\", \"mode\": \"demo\", \"output\": \"No LLM or workflow tool was called.\", \"status\": \"blocked\"}]"
@@ -188,7 +188,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.012208009138703346,
+      "latency_ms": 0.010082963854074478,
       "success": true,
       "answer": "This assistant only handles wildfire operations, AOI analysis, risk evidence, monitoring, reports, visualizations, and approval-gated response actions. Your request was blocked before any LLM call. Rephrase it with explicit wildfire or AOI context.",
       "trace_text": "[{\"called\": \"Domain Scope Gate\", \"did\": \"Blocked an out-of-domain request before conversation or model processing.\", \"mode\": \"demo\", \"output\": \"No LLM or workflow tool was called.\", \"status\": \"blocked\"}]"
@@ -209,7 +209,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.21066702902317047,
+      "latency_ms": 0.5811250302940607,
       "success": true,
       "answer": null,
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Gemini Context Answer.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -230,7 +230,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.11737481690943241,
+      "latency_ms": 0.1232498325407505,
       "success": true,
       "answer": null,
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Gemini Context Answer.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -251,7 +251,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.0924582127481699,
+      "latency_ms": 0.10274979285895824,
       "success": true,
       "answer": null,
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Gemini Context Answer.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -272,7 +272,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.09629200212657452,
+      "latency_ms": 0.10575004853308201,
       "success": true,
       "answer": null,
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Gemini Context Answer.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -293,7 +293,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.095415860414505,
+      "latency_ms": 0.10179099626839161,
       "success": true,
       "answer": null,
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Gemini Context Answer.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -314,7 +314,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.08004205301404,
+      "latency_ms": 0.08729193359613419,
       "success": true,
       "answer": null,
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Gemini Context Answer.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -335,7 +335,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.08033285848796368,
+      "latency_ms": 0.08833291940391064,
       "success": true,
       "answer": null,
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Gemini Context Answer.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -356,7 +356,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.08266698569059372,
+      "latency_ms": 0.08862488903105259,
       "success": true,
       "answer": null,
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Gemini Context Answer.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -377,7 +377,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 31.348791904747486,
+      "latency_ms": 40.28366692364216,
       "success": true,
       "answer": "Kakadu Focus AOI is currently LOW at 10/100 after a chat-driven demo analysis. Elastic MCP demo evidence was queried as an operational evidence source alongside current hotspot, weather, warning, and exposure inputs. The top recommendation is to inspect the hotspot cluster near exposed road and town assets first. Daily Wildfire Operations Brief was generated and saved to the dashboard. No alert was created in this demo run.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Analysis Workflow.\", \"mode\": \"demo\", \"output\": \"Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"External Data Tools\", \"did\": \"Called hotspot, weather, warning, and exposure tools.\", \"mode\": \"demo\", \"output\": \"LOW 10/100.\", \"status\": \"completed\"}, {\"called\": \"Elastic MCP Tool\", \"did\": \"Queried operational evidence.\", \"mode\": \"demo\", \"output\": \"Elastic MCP demo evidence.\", \"status\": \"completed\"}]"
@@ -405,7 +405,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.23341691121459007,
+      "latency_ms": 0.23933383636176586,
       "success": true,
       "answer": "Baseline risk is EXTREME (99/100). Scenario risk is EXTREME (99/100).",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected What-if Agent.\", \"mode\": \"demo\", \"output\": \"Baseline risk is EXTREME (99/100). Scenario risk is EXTREME (99/100).\", \"status\": \"completed\"}]"
@@ -433,7 +433,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.13100006617605686,
+      "latency_ms": 0.14050002209842205,
       "success": true,
       "answer": "Created a pending-approval public advisory draft: Public advisory draft for Kakadu Focus AOI. Current wildfire operational risk is HIGH (72/100). Official warning status to verify: Watch and Act. Check official emergency channels for current warnings and follow instructions from responsible agencies. This draft is pending human approval and official-source verification before release.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Action Workflow.\", \"mode\": \"demo\", \"output\": \"Draft created only. External execution requires human approval.\", \"status\": \"completed\"}]"
@@ -461,7 +461,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.11354195885360241,
+      "latency_ms": 0.11974992230534554,
       "success": true,
       "answer": "Generated a fresh operations brief from the latest completed run in demo mode.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Report Agent.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}]"
@@ -482,7 +482,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 47.3836250603199,
+      "latency_ms": 52.4202911183238,
       "success": true,
       "answer": "Generated hotspot heatmap and contour analysis for Kakadu Focus AOI. Kakadu Focus AOI has no rendered hotspot detections inside the selected AOI. The visualization is ready to download.",
       "trace_text": "[{\"called\": \"Hotspot Visualization Tool\", \"did\": \"Generated heatmap cells and contour bands.\", \"mode\": \"demo\", \"output\": \"Monitor\", \"status\": \"completed\"}]"
@@ -517,7 +517,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 4.569290904328227,
+      "latency_ms": 4.595333011820912,
       "success": true,
       "answer": "Created an active monitor task for Kakadu Focus AOI. It will refresh risk every 15 minutes while the backend instance is running and create an alert if the score jumps materially.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Monitor Task Workflow.\", \"mode\": \"adk\", \"output\": \"Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"Monitoring Scheduler\", \"did\": \"Created recurring risk check.\", \"mode\": \"adk\", \"output\": \"15 minute interval\", \"status\": \"completed\"}, {\"called\": \"Alert Rule\", \"did\": \"Configured material-change alerting.\", \"mode\": \"adk\", \"output\": \"score delta >= 12\", \"status\": \"completed\"}]"
@@ -538,7 +538,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 77.39670784212649,
+      "latency_ms": 87.72845799103379,
       "success": true,
       "answer": "Risk trend uses 11 daily points across the default -5/+5 day analysis window. Historical/current/forecast points come from the latest analysis artifact. Latest point: HIGH at 75/100.",
       "trace_text": "[{\"called\": \"Risk Timeseries Tool\", \"did\": \"Built risk timeseries and rendered PNG chart.\", \"mode\": \"demo\", \"output\": \"11 points with downloadable PNG.\", \"status\": \"completed\"}]"
@@ -559,7 +559,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 75.13466710224748,
+      "latency_ms": 76.68670918792486,
       "success": true,
       "answer": "Prediction uses the current AOI analysis and deterministic +5 day forecast window. Highest predicted risk is EXTREME at 81/100 on 2026-08-21.",
       "trace_text": "[{\"called\": \"Risk Timeseries Tool\", \"did\": \"Built risk timeseries and rendered PNG chart.\", \"mode\": \"demo\", \"output\": \"11 points with downloadable PNG.\", \"status\": \"completed\"}]"
@@ -584,7 +584,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.10483292862772942,
+      "latency_ms": 0.10575004853308201,
       "success": true,
       "answer": "Your previous question was: \"Which area should we inspect first?\"",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic LAST_USER_QUESTION lookup.\", \"output\": \"success\"}]"
@@ -609,7 +609,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.07845787331461906,
+      "latency_ms": 0.07979106158018112,
       "success": true,
       "answer": "Your previous question was: \"Show evidence for the current wildfire risk.\"",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic LAST_USER_QUESTION lookup.\", \"output\": \"success\"}]"
@@ -634,7 +634,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.0715828500688076,
+      "latency_ms": 0.07487484253942966,
       "success": true,
       "answer": "Your previous question was: \"How many hotspots are in this AOI?\"",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic LAST_USER_QUESTION lookup.\", \"output\": \"success\"}]"
@@ -683,7 +683,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.07716682739555836,
+      "latency_ms": 0.07895799353718758,
       "success": true,
       "answer": "The active AOI is Kakadu Focus AOI, centered at -12.4513, 132.9192 with a 100.0 km radius.",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic ACTIVE_AOI lookup.\", \"output\": \"success\"}]"
@@ -701,8 +701,8 @@
       "argument_results": [
         {
           "path": "response.memory.run_id",
-          "expected": "run_fd9794bc74",
-          "actual": "run_fd9794bc74",
+          "expected": "run_660eb73f2d",
+          "actual": "run_660eb73f2d",
           "ok": true
         }
       ],
@@ -742,7 +742,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.08020899258553982,
+      "latency_ms": 0.08174986578524113,
       "success": true,
       "answer": "The active AOI is Kakadu Focus AOI, centered at -12.4513, 132.9192 with a 100 km radius.",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic ACTIVE_AOI lookup.\", \"output\": \"success\"}]"
@@ -760,8 +760,8 @@
       "argument_results": [
         {
           "path": "response.memory.run_id",
-          "expected": "run_658563a0ed",
-          "actual": "run_658563a0ed",
+          "expected": "run_1902fa66e3",
+          "actual": "run_1902fa66e3",
           "ok": true
         }
       ],
@@ -801,7 +801,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.07358286529779434,
+      "latency_ms": 0.07654097862541676,
       "success": true,
       "answer": "The AOI for Daily Wildfire Operations Brief is Kakadu Focus AOI, centered at -12.4513, 132.9192 with a 100 km radius.",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic LATEST_REPORT_AOI lookup.\", \"output\": \"success\"}]"
@@ -853,7 +853,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.08241599425673485,
+      "latency_ms": 0.08462509140372276,
       "success": true,
       "answer": "The AOI for Daily Wildfire Operations Brief is Kakadu Focus AOI, centered at -12.4513, 132.9192 with a 100 km radius.",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic LATEST_REPORT_AOI lookup.\", \"output\": \"success\"}]"
@@ -881,7 +881,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.06679189391434193,
+      "latency_ms": 0.07095793262124062,
       "success": true,
       "answer": "No persisted report was found for the selected analysis run.",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic LATEST_REPORT_AOI lookup.\", \"output\": \"not_found\"}]"
@@ -906,7 +906,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.0750841572880745,
+      "latency_ms": 0.07604202255606651,
       "success": true,
       "answer": "The latest action \"Public Advisory Draft - Kakadu Focus AOI\" is pending_approval.",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic LAST_ACTION_STATUS lookup.\", \"output\": \"success\"}]"
@@ -934,7 +934,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.07691700011491776,
+      "latency_ms": 0.08012494072318077,
       "success": true,
       "answer": "No persisted action was found for the current user and analysis run.",
       "trace_text": "[{\"called\": \"Conversation Memory Tool\", \"did\": \"Performed deterministic LAST_ACTION_STATUS lookup.\", \"output\": \"not_found\"}]"
@@ -962,7 +962,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 4.3306672014296055,
+      "latency_ms": 4.575500031933188,
       "success": true,
       "answer": "Created an active monitor task for Kakadu Focus AOI. It will refresh risk every 45 minutes while the backend instance is running and create an alert if the score jumps materially.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Monitor Task Workflow.\", \"mode\": \"adk\", \"output\": \"Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"Monitoring Scheduler\", \"did\": \"Created recurring risk check.\", \"mode\": \"adk\", \"output\": \"45 minute interval\", \"status\": \"completed\"}, {\"called\": \"Alert Rule\", \"did\": \"Configured material-change alerting.\", \"mode\": \"adk\", \"output\": \"score delta >= 12\", \"status\": \"completed\"}]"
@@ -990,7 +990,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 4.111291142180562,
+      "latency_ms": 4.632374970242381,
       "success": true,
       "answer": "Created an active monitor task for Kakadu Focus AOI. It will refresh risk every 120 minutes while the backend instance is running and create an alert if the score jumps materially.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Monitor Task Workflow.\", \"mode\": \"adk\", \"output\": \"Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"Monitoring Scheduler\", \"did\": \"Created recurring risk check.\", \"mode\": \"adk\", \"output\": \"120 minute interval\", \"status\": \"completed\"}, {\"called\": \"Alert Rule\", \"did\": \"Configured material-change alerting.\", \"mode\": \"adk\", \"output\": \"score delta >= 12\", \"status\": \"completed\"}]"
@@ -1030,7 +1030,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 5.2694580517709255,
+      "latency_ms": 6.140332901850343,
       "success": true,
       "answer": "Kakadu Focus AOI is currently LOW at 10/100 after a chat-driven demo analysis. Elastic MCP demo evidence was queried as an operational evidence source alongside current hotspot, weather, warning, and exposure inputs. The top recommendation is to inspect the hotspot cluster near exposed road and town assets first. Daily Wildfire Operations Brief was generated and saved to the dashboard. No alert was created in this demo run.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Analysis Workflow.\", \"mode\": \"demo\", \"output\": \"Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"External Data Tools\", \"did\": \"Called hotspot, weather, warning, and exposure tools.\", \"mode\": \"demo\", \"output\": \"LOW 10/100.\", \"status\": \"completed\"}, {\"called\": \"Elastic MCP Tool\", \"did\": \"Queried operational evidence.\", \"mode\": \"demo\", \"output\": \"Elastic MCP demo evidence.\", \"status\": \"completed\"}]"
@@ -1058,7 +1058,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.10870909318327904,
+      "latency_ms": 0.12670806609094143,
       "success": true,
       "answer": "Baseline risk is EXTREME (99/100). Scenario risk is EXTREME (99/100).",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected What-if Agent.\", \"mode\": \"demo\", \"output\": \"Baseline risk is EXTREME (99/100). Scenario risk is EXTREME (99/100).\", \"status\": \"completed\"}]"
@@ -1094,7 +1094,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.16695796512067318,
+      "latency_ms": 0.1860000193119049,
       "success": true,
       "answer": "For Kakadu Focus AOI, spatial evidence returned 3 critical assets and 0 protected or park areas. Critical assets: Remote clinic; Power substation; Water treatment site. Protected/park areas: Kakadu National Park. The current exposure tool does not enumerate named road corridors or town/settlement assets, so I will not claim specific roads or towns from this evidence.\n\nCreated a pending-approval public safety draft: Public safety advisory draft for Kakadu Focus AOI. Current wildfire operational risk is HIGH (72/100). Avoid the affected area unless official emergency services advise otherwise. Exposure context: For Kakadu Focus AOI, spatial evidence returned 3 critical assets and 0 protected or park areas. Critical assets: Remote clinic; Power substation; Water treatment site. Protected/park areas: Kakadu National Park. The current exposure tool does not enumerate named road corridors or town/settlement assets, so I will not claim specific roads or towns from this evidence. Check official emergency channels for current warnings, road closures, and evacuation instructions. This draft is pending human approval and official-source verification before release. External publication still requires human approval.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Decomposed mixed request.\", \"mode\": \"demo\", \"output\": \"Ran exposure lookup before creating an approval-gated public safety draft.\", \"status\": \"completed\"}, {\"called\": \"Analyst Agent\", \"did\": \"Answered roads and assets question.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}, {\"called\": \"Action Workflow\", \"did\": \"Created draft action and approval record.\", \"mode\": \"demo\", \"output\": \"Public Advisory Draft - Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"Safety Boundary\", \"did\": \"Blocked direct external publication.\", \"mode\": \"demo\", \"output\": \"pending_approval\", \"status\": \"completed\"}]"
@@ -1130,7 +1130,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.15058298595249653,
+      "latency_ms": 0.16733421944081783,
       "success": true,
       "answer": "For Kakadu Focus AOI, spatial evidence returned 3 critical assets and 0 protected or park areas. Critical assets: Remote clinic; Power substation; Water treatment site. Protected/park areas: Kakadu National Park. The current exposure tool does not enumerate named road corridors or town/settlement assets, so I will not claim specific roads or towns from this evidence.\n\nCreated a pending-approval public safety draft: Public safety advisory draft for Kakadu Focus AOI. Current wildfire operational risk is HIGH (72/100). Avoid the affected area unless official emergency services advise otherwise. Exposure context: For Kakadu Focus AOI, spatial evidence returned 3 critical assets and 0 protected or park areas. Critical assets: Remote clinic; Power substation; Water treatment site. Protected/park areas: Kakadu National Park. The current exposure tool does not enumerate named road corridors or town/settlement assets, so I will not claim specific roads or towns from this evidence. Check official emergency channels for current warnings, road closures, and evacuation instructions. This draft is pending human approval and official-source verification before release. External publication still requires human approval.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Decomposed mixed request.\", \"mode\": \"demo\", \"output\": \"Ran exposure lookup before creating an approval-gated public safety draft.\", \"status\": \"completed\"}, {\"called\": \"Analyst Agent\", \"did\": \"Answered roads and assets question.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}, {\"called\": \"Action Workflow\", \"did\": \"Created draft action and approval record.\", \"mode\": \"demo\", \"output\": \"Public Advisory Draft - Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"Safety Boundary\", \"did\": \"Blocked direct external publication.\", \"mode\": \"demo\", \"output\": \"pending_approval\", \"status\": \"completed\"}]"
@@ -1166,7 +1166,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.1445829402655363,
+      "latency_ms": 0.15112501569092274,
       "success": true,
       "answer": "For Kakadu Focus AOI, spatial evidence returned 3 critical assets and 0 protected or park areas. Critical assets: Remote clinic; Power substation; Water treatment site. Protected/park areas: Kakadu National Park. The current exposure tool does not enumerate named road corridors or town/settlement assets, so I will not claim specific roads or towns from this evidence.\n\nCreated a pending-approval public safety draft: Public safety advisory draft for Kakadu Focus AOI. Current wildfire operational risk is HIGH (72/100). Avoid the affected area unless official emergency services advise otherwise. Exposure context: For Kakadu Focus AOI, spatial evidence returned 3 critical assets and 0 protected or park areas. Critical assets: Remote clinic; Power substation; Water treatment site. Protected/park areas: Kakadu National Park. The current exposure tool does not enumerate named road corridors or town/settlement assets, so I will not claim specific roads or towns from this evidence. Check official emergency channels for current warnings, road closures, and evacuation instructions. This draft is pending human approval and official-source verification before release. External publication still requires human approval.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Decomposed mixed request.\", \"mode\": \"demo\", \"output\": \"Ran exposure lookup before creating an approval-gated public safety draft.\", \"status\": \"completed\"}, {\"called\": \"Analyst Agent\", \"did\": \"Answered roads and assets question.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}, {\"called\": \"Action Workflow\", \"did\": \"Created draft action and approval record.\", \"mode\": \"demo\", \"output\": \"Public Advisory Draft - Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"Safety Boundary\", \"did\": \"Blocked direct external publication.\", \"mode\": \"demo\", \"output\": \"pending_approval\", \"status\": \"completed\"}]"
@@ -1202,7 +1202,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.14429097063839436,
+      "latency_ms": 0.1485419925302267,
       "success": true,
       "answer": "For Kakadu Focus AOI, spatial evidence returned 3 critical assets and 0 protected or park areas. Critical assets: Remote clinic; Power substation; Water treatment site. Protected/park areas: Kakadu National Park. The current exposure tool does not enumerate named road corridors or town/settlement assets, so I will not claim specific roads or towns from this evidence.\n\nCreated a pending-approval public safety draft: Public safety advisory draft for Kakadu Focus AOI. Current wildfire operational risk is HIGH (72/100). Avoid the affected area unless official emergency services advise otherwise. Exposure context: For Kakadu Focus AOI, spatial evidence returned 3 critical assets and 0 protected or park areas. Critical assets: Remote clinic; Power substation; Water treatment site. Protected/park areas: Kakadu National Park. The current exposure tool does not enumerate named road corridors or town/settlement assets, so I will not claim specific roads or towns from this evidence. Check official emergency channels for current warnings, road closures, and evacuation instructions. This draft is pending human approval and official-source verification before release. External publication still requires human approval.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Decomposed mixed request.\", \"mode\": \"demo\", \"output\": \"Ran exposure lookup before creating an approval-gated public safety draft.\", \"status\": \"completed\"}, {\"called\": \"Analyst Agent\", \"did\": \"Answered roads and assets question.\", \"mode\": \"demo\", \"output\": \"success\", \"status\": \"completed\"}, {\"called\": \"Action Workflow\", \"did\": \"Created draft action and approval record.\", \"mode\": \"demo\", \"output\": \"Public Advisory Draft - Kakadu Focus AOI\", \"status\": \"completed\"}, {\"called\": \"Safety Boundary\", \"did\": \"Blocked direct external publication.\", \"mode\": \"demo\", \"output\": \"pending_approval\", \"status\": \"completed\"}]"
@@ -1236,7 +1236,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.1033339649438858,
+      "latency_ms": 0.11175009422004223,
       "success": true,
       "answer": "Created a pending-approval public advisory draft: Public advisory draft for Kakadu Focus AOI. Current wildfire operational risk is HIGH (72/100). Official warning status to verify: Watch and Act. Check official emergency channels for current warnings and follow instructions from responsible agencies. This draft is pending human approval and official-source verification before release.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Action Workflow.\", \"mode\": \"demo\", \"output\": \"Draft created only. External execution requires human approval.\", \"status\": \"completed\"}]"
@@ -1270,7 +1270,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.09125005453824997,
+      "latency_ms": 0.0987909734249115,
       "success": true,
       "answer": "Created a pending-approval emergency services email draft: Emergency services email draft for Kakadu Focus AOI. Current wildfire operational risk is HIGH (72/100). Official warning status to verify: Watch and Act. Please verify official warning status and local access constraints before any external distribution. This draft is pending human approval and official-source verification before release.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Selected Action Workflow.\", \"mode\": \"demo\", \"output\": \"Draft created only. External execution requires human approval.\", \"status\": \"completed\"}]"
@@ -1304,7 +1304,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.07487507537007332,
+      "latency_ms": 0.08216709829866886,
       "success": true,
       "answer": "Run analysis first for live_australia. I need a completed analysis run before questions, what-if scenarios, visualizations, monitoring, or action drafts for this AOI.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Blocked before workflow tool calls.\", \"mode\": \"demo\", \"output\": \"Analysis required for this AOI.\", \"status\": \"failed\"}]"
@@ -1332,7 +1332,7 @@
       ],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.07329205982387066,
+      "latency_ms": 0.07895799353718758,
       "success": true,
       "answer": "Run analysis first for live_australia. I need a completed analysis run before questions, what-if scenarios, visualizations, monitoring, or action drafts for this AOI.",
       "trace_text": "[{\"called\": \"Main Coordinator\", \"did\": \"Blocked before workflow tool calls.\", \"mode\": \"demo\", \"output\": \"Analysis required for this AOI.\", \"status\": \"failed\"}]"
@@ -1353,7 +1353,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.06504193879663944,
+      "latency_ms": 0.07016700692474842,
       "success": true,
       "answer": "This wildfire question requires verified document retrieval, but the production RAG pipeline is not enabled in this phase. I will not answer from model memory.",
       "trace_text": "[{\"called\": \"Knowledge Retrieval Required\", \"did\": \"Stopped before generation because no deterministic tool can answer the request.\", \"mode\": \"demo\", \"output\": \"Verified document retrieval is required.\", \"status\": \"blocked\"}]"
@@ -1374,7 +1374,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.06279093213379383,
+      "latency_ms": 0.06620795466005802,
       "success": true,
       "answer": "This wildfire question requires verified document retrieval, but the production RAG pipeline is not enabled in this phase. I will not answer from model memory.",
       "trace_text": "[{\"called\": \"Knowledge Retrieval Required\", \"did\": \"Stopped before generation because no deterministic tool can answer the request.\", \"mode\": \"demo\", \"output\": \"Verified document retrieval is required.\", \"status\": \"blocked\"}]"
@@ -1402,7 +1402,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.17045903950929642,
+      "latency_ms": 0.33816718496382236,
       "success": true,
       "answer": "Deterministic calculation result: 314.159.",
       "trace_text": "[{\"called\": \"Deterministic Python Calculator\", \"did\": \"Executed circle_area_km2 without model arithmetic.\", \"mode\": \"demo\", \"output\": \"314.1592653589793\", \"status\": \"completed\"}]"
@@ -1430,7 +1430,7 @@
       "artifact_results": [],
       "unsafe_executed": false,
       "hallucinated_state": false,
-      "latency_ms": 0.07145805284380913,
+      "latency_ms": 0.08879113011062145,
       "success": true,
       "answer": "Deterministic calculation result: 37.5.",
       "trace_text": "[{\"called\": \"Deterministic Python Calculator\", \"did\": \"Executed percent_change without model arithmetic.\", \"mode\": \"demo\", \"output\": \"37.5\", \"status\": \"completed\"}]"
