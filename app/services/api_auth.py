@@ -1,12 +1,17 @@
+import asyncio
+import json
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException, Request, WebSocket, status
+from fastapi.websockets import WebSocketDisconnect
 from google.auth import exceptions as google_auth_exceptions
 from google.auth.transport import requests as google_auth_requests
 from google.oauth2 import id_token
 
 from app.config.settings import settings
+
+WEBSOCKET_AUTH_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -49,17 +54,38 @@ def verify_api_request(request: Request) -> None:
 
 
 async def verify_api_websocket(websocket: WebSocket) -> bool:
+    """Accept the socket, then take the credential from its first frame.
+
+    Browsers cannot set headers on a WebSocket handshake, so the token used to travel
+    as a query parameter, where it is recorded in access logs and proxy history. The
+    first frame keeps it out of the URL entirely.
+    """
     if not _is_allowed_origin(websocket.headers.get("origin")):
         await websocket.close(code=1008)
         return False
+    await websocket.accept()
     if not is_api_auth_enabled():
         return True
-    token = websocket.query_params.get("id_token")
-    user = _verified_auth_user(token)
+    user = await _websocket_user_from_first_frame(websocket)
     if user is not None and _is_allowed_user(user):
         return True
     await websocket.close(code=1008)
     return False
+
+
+async def _websocket_user_from_first_frame(websocket: WebSocket) -> AuthUser | None:
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=WEBSOCKET_AUTH_TIMEOUT_SECONDS)
+    except (TimeoutError, WebSocketDisconnect, RuntimeError):
+        return None
+    try:
+        message = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(message, dict) or message.get("type") != "auth":
+        return None
+    token = message.get("token")
+    return _verified_auth_user(token) if isinstance(token, str) else None
 
 
 def get_authenticated_user(request: Request) -> AuthUser | None:

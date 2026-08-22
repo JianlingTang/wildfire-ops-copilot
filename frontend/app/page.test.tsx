@@ -9,7 +9,7 @@ const pending = <T,>() => new Promise<T>(() => {});
 vi.mock("../lib/api", () => ({
   getHotspotOverview: vi.fn(pending),
   getRecentAgentEvents: vi.fn(pending),
-  getAgentEventsWebSocketUrl: vi.fn(pending),
+  openAgentEventsSocket: vi.fn(pending),
   getHotspotFocus: vi.fn(pending),
   getActions: vi.fn(pending),
   getAlerts: vi.fn(pending),

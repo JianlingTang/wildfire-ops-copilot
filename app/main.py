@@ -33,6 +33,9 @@ api_dependencies = [Depends(verify_api_request)]
 
 app.include_router(runs.router, prefix="/api", dependencies=api_dependencies)
 app.include_router(agent_events.router, prefix="/api", dependencies=api_dependencies)
+# No HTTP dependency: verify_api_request needs a Request, which a WebSocket scope
+# cannot provide. This router authenticates from the socket's first frame.
+app.include_router(agent_events.websocket_router, prefix="/api")
 app.include_router(chat.router, prefix="/api", dependencies=api_dependencies)
 app.include_router(hotspots.router, prefix="/api", dependencies=api_dependencies)
 app.include_router(alerts.router, prefix="/api", dependencies=api_dependencies)

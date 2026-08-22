@@ -26,7 +26,7 @@ import {
   ApiRun,
   ApiRequestError,
   ChatApiResult,
-  getAgentEventsWebSocketUrl,
+  openAgentEventsSocket,
   getActions,
   getAlerts,
   getHotspotFocus,
@@ -171,11 +171,14 @@ function OperationsConsole() {
 
     async function connectStream() {
       try {
-        socket = new WebSocket(await getAgentEventsWebSocketUrl());
+        socket = await openAgentEventsSocket();
         socket.onmessage = (event) => {
           try {
-            const parsed = JSON.parse(event.data) as ApiAgentEvent;
-            setAgentEvents((current) => upsertEvent([...current, parsed]).slice(-20));
+            const parsed = JSON.parse(event.data);
+            // The server opens with a {"type":"ready"} frame; only agent events carry an id.
+            if (parsed?.event_id) {
+              setAgentEvents((current) => upsertEvent([...current, parsed as ApiAgentEvent]).slice(-20));
+            }
           } catch {
             // Ignore malformed observability events.
           }

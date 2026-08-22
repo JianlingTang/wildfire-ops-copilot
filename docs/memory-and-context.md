@@ -147,10 +147,27 @@
 
 `actions.py` 保持独立是有意的 —— 它的权限要求不同,硬塞进同一个函数就是错误的抽象。
 
-### 仍未补齐
+**WebSocket 凭据已移出 URL。** 浏览器无法在 WebSocket 握手时设置请求头,所以凭据原先
+挂在 query 参数上(`?id_token=...`),而 query string 会被记进访问日志和代理历史。
+现在改为:服务端先 accept,再从**首帧** `{"type":"auth","token":"..."}` 读取凭据,
+5 秒内没有合法凭据就以 1008 关闭。认证通过后服务端回一帧 `{"type":"ready"}`,
+客户端据此区分「已认证可用」和「即将被关闭」。
 
-**WebSocket 的 token 走 query 参数**(`?id_token=...`)。query string 会进访问日志,
-凭据不该出现在那里。可改为握手后首帧发送,或用短时效的一次性票据。
+### 顺带发现:WebSocket 端点此前完全是坏的
+
+`app/main.py` 把 `dependencies=api_dependencies` 应用到了**所有** router,包括含
+WebSocket 路由的 `agent_events`。而 `verify_api_request(request: Request)` 在
+WebSocket scope 下拿不到 `Request`,于是每次连接都抛:
+
+```
+TypeError: verify_api_request() missing 1 required positional argument: 'request'
+```
+
+**即使鉴权完全关闭也一样连不上**(已实测复现)。前端因为 `onerror` / `onclose` 里有
+回退逻辑,静默降级成了 2.5 秒轮询,所以一直没人发现 —— 实时事件流从来没有真正工作过。
+
+修法是把 WebSocket 路由拆到独立的 `websocket_router`,挂载时不带那个 HTTP 依赖;
+它本来就有自己的鉴权。
 
 ## 1.8 顺带修复:循环导入
 
@@ -694,12 +711,13 @@ Cloud Run 按实例数计费,作品集项目设 `--max-instances 2` 就够了。
 | 14 | ~~身份认证:审批 `actor` 从 token 取 + 要求 admin~~ | 审批链路不再可伪造 | ✅ 已完成(见 1.7) |
 | 15 | ~~chat 处理器用已验证身份覆盖 `ChatRequest.user_id`~~ | 1.6 的归属检查真正生效 | ✅ 已完成 |
 | 16 | ~~`alerts.py` 的 `actor` 同样从 token 取~~ | 审计日志的操作人不再可伪造 | ✅ 已完成 |
-| 17 | WebSocket token 移出 query 参数 | 凭据不进访问日志 | 半天 |
+| 17 | ~~WebSocket token 移出 query 参数~~(顺带修好了从未工作过的 WS 端点) | 凭据不进访问日志 | ✅ 已完成 |
 
 **第 3、4 步今天就能做完,而且零成本** —— 它们直接解决你感知到的 10 秒卡顿。
 **第 5 步优先级最高**:679 MB 的解析峰值配 1Gi 内存和 concurrency 4,现在是随时会 OOM 的状态。
-第 11 步是解锁一切的关键。身份认证部分(第 14–16 步)已经全部完成,
-**审批、对话、告警确认三条链路的身份都不再可伪造**;只剩第 17 步 WebSocket 凭据。
+第 11 步是解锁一切的关键。**身份认证部分(第 14–17 步)已经全部完成**:
+审批、对话、告警确认三条链路的身份都不再可伪造,WebSocket 凭据也移出了 URL。
+剩下的都是性能与存储改造,不再有已知的鉴权缺口。
 
 ---
 

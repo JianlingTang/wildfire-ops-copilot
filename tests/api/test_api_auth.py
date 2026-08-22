@@ -1,7 +1,9 @@
 import importlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
+from fastapi.websockets import WebSocketDisconnect
 
 import app.config.settings as settings_module
 import app.services.api_auth as api_auth_module
@@ -250,3 +252,65 @@ def test_alert_acknowledgement_does_not_require_an_admin(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert _acknowledged_actors() == ["operator@example.com"]
+
+
+WS_PATH = "/api/agent-events/ws"
+
+
+def _auth_frame(token: str = "firebase-id-token") -> str:
+    return json.dumps({"type": "auth", "token": token})
+
+
+def test_websocket_authenticates_from_the_first_frame(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+    _accept_token_for(monkeypatch, "operator@example.com")
+    client = TestClient(app)
+
+    with client.websocket_connect(WS_PATH) as websocket:
+        websocket.send_text(_auth_frame())
+
+        assert json.loads(websocket.receive_text()) == {"type": "ready"}
+
+
+def test_websocket_no_longer_accepts_a_token_in_the_query_string(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+    _accept_token_for(monkeypatch, "operator@example.com")
+    client = TestClient(app)
+
+    # The credential must not be usable from the URL, where it lands in access logs.
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(f"{WS_PATH}?id_token=firebase-id-token") as websocket:
+            websocket.receive_text()
+
+
+def test_websocket_rejects_an_invalid_first_frame_token(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+
+    def reject_token(*args, **kwargs):
+        raise ValueError("invalid token")
+
+    monkeypatch.setattr(api_auth_module.id_token, "verify_firebase_token", reject_token)
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(WS_PATH) as websocket:
+            websocket.send_text(_auth_frame("invalid-token"))
+            websocket.receive_text()
+
+
+def test_websocket_rejects_a_user_who_is_not_on_the_allowlist(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+    _accept_token_for(monkeypatch, "outsider@example.com")
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(WS_PATH) as websocket:
+            websocket.send_text(_auth_frame())
+            websocket.receive_text()
+
+
+def test_websocket_needs_no_credential_when_auth_is_disabled() -> None:
+    client = TestClient(app)
+
+    with client.websocket_connect(WS_PATH) as websocket:
+        assert json.loads(websocket.receive_text()) == {"type": "ready"}
