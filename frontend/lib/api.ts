@@ -88,8 +88,10 @@ export type ApiEvidence = {
     hotspot_count_24h?: number;
   };
   hotspots?: {
+    status?: string;
     source?: string;
     mode?: string;
+    message?: string;
     data?: {
       count_24h?: number;
       count_7d?: number;
@@ -110,9 +112,19 @@ export type ApiEvidence = {
   [key: string]: any;
 };
 
-import { getFirebaseIdToken } from "./firebaseAuth";
+import { getFirebaseIdToken, getFirebaseUserEmail } from "./firebaseAuth";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8001";
+
+export class ApiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
 
 async function apiHeaders(headers: HeadersInit = {}): Promise<HeadersInit> {
   const idToken = await getFirebaseIdToken();
@@ -414,20 +426,39 @@ function roundMs(value: number) {
 }
 
 export async function getHotspotOverview(): Promise<ApiHotspotOverview> {
-  const response = await fetch(`${API_BASE_URL}/api/hotspots/overview`, {headers: await apiHeaders()});
-  if (!response.ok) {
-    throw new Error("Failed to load hotspot overview");
-  }
-  return response.json();
+  const response = await fetch(`${API_BASE_URL}/api/hotspots/overview`, {cache: "no-store", headers: await apiHeaders()});
+  return parseHotspotResponse<ApiHotspotOverview>(response, "Failed to load hotspot overview");
 }
 
 export async function getHotspotFocus(state: string, radiusKm: number): Promise<ApiHotspotFocus> {
   const params = new URLSearchParams({state, radius_km: String(radiusKm)});
-  const response = await fetch(`${API_BASE_URL}/api/hotspots/focus?${params.toString()}`, {headers: await apiHeaders()});
-  if (!response.ok) {
-    throw new Error("Failed to load hotspot focus");
+  const response = await fetch(`${API_BASE_URL}/api/hotspots/focus?${params.toString()}`, {cache: "no-store", headers: await apiHeaders()});
+  return parseHotspotResponse<ApiHotspotFocus>(response, "Failed to load hotspot focus");
+}
+
+async function parseHotspotResponse<T extends {status: string; message?: string; data: unknown}>(
+  response: Response,
+  fallbackMessage: string
+): Promise<T> {
+  const payload = (await response.json().catch(() => null)) as T | null;
+  if (response.status === 403) {
+    const email = getFirebaseUserEmail();
+    throw new ApiRequestError(
+      [
+        email ? `Signed in as ${email}.` : "Signed in account is not authorized.",
+        "This account is not authorized for this demo.",
+        "Please use the approved operator account."
+      ].join(" "),
+      response.status
+    );
   }
-  return response.json();
+  if (response.status === 401) {
+    throw new ApiRequestError("Please sign in with an approved Google account for this demo.", response.status);
+  }
+  if (!response.ok || payload?.status !== "success" || !payload.data) {
+    throw new ApiRequestError(payload?.message ?? fallbackMessage, response.status);
+  }
+  return payload;
 }
 
 export async function getRunEvents(runId: string): Promise<{events: ApiTraceEvent[]}> {

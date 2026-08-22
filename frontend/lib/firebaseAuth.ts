@@ -27,6 +27,10 @@ export async function getFirebaseIdToken(): Promise<string | null> {
   return getFirebaseAuth()?.currentUser?.getIdToken() ?? null;
 }
 
+export function getFirebaseUserEmail(): string | null {
+  return getFirebaseAuth()?.currentUser?.email ?? null;
+}
+
 export function onFirebaseUserChanged(callback: (user: User | null) => void): () => void {
   const auth = getFirebaseAuth();
   if (!auth) {
