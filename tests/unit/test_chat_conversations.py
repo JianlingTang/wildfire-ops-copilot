@@ -80,3 +80,53 @@ def test_finalize_chat_response_archives_tool_trace_and_results() -> None:
     assert assistant["tool_trace"][0]["called"] == "Tool"
     assert assistant["tool_results"]["status"] == "success"
     assert assistant["tool_results"]["value"] == 1
+
+
+def test_client_supplied_conversation_id_is_never_adopted() -> None:
+    conversation = store.get_or_create_conversation(
+        conversation_id="pending",
+        user_id="officer_a",
+        region_id="state_nsw",
+    )
+
+    assert conversation.conversation_id != "pending"
+    assert conversation.conversation_id.startswith("conv_")
+    assert "pending" not in store.conversations
+
+
+def test_two_users_sending_the_same_id_do_not_share_a_conversation() -> None:
+    first = store.get_or_create_conversation(
+        conversation_id="pending", user_id="officer_a", region_id="state_nsw"
+    )
+    second = store.get_or_create_conversation(
+        conversation_id="pending", user_id="officer_b", region_id="state_nsw"
+    )
+
+    assert first.conversation_id != second.conversation_id
+    assert second.user_id == "officer_b"
+
+
+def test_owner_resumes_their_own_conversation() -> None:
+    first = store.get_or_create_conversation(
+        conversation_id=None, user_id="officer_a", region_id="state_nsw"
+    )
+    resumed = store.get_or_create_conversation(
+        conversation_id=first.conversation_id, user_id="officer_a", region_id="state_nsw"
+    )
+
+    assert resumed.conversation_id == first.conversation_id
+
+
+def test_non_owner_cannot_join_an_existing_conversation() -> None:
+    owned = store.get_or_create_conversation(
+        conversation_id=None, user_id="officer_a", region_id="state_nsw"
+    )
+    store.append_chat_message(owned.conversation_id, role="user", content="A private question")
+
+    intruder = store.get_or_create_conversation(
+        conversation_id=owned.conversation_id, user_id="officer_b", region_id="state_nsw"
+    )
+
+    assert intruder.conversation_id != owned.conversation_id
+    assert intruder.messages == []
+    assert store.conversations[owned.conversation_id].user_id == "officer_a"

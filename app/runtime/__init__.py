@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import os
 
-from app.runtime.adk import AdkRuntime
 from app.runtime.base import AgentRuntime
-from app.runtime.mock_demo import MockDemoRuntime
 
 
 def get_runtime() -> AgentRuntime:
-    runtime_name = os.getenv("AGENT_RUNTIME", "adk").lower()
-    if runtime_name == "mock_demo":
+    # Imported lazily: the concrete runtimes import app.services.chat_conversations, which
+    # imports app.runtime.intents. Importing them here would make that a cycle, so any module
+    # that reached app.runtime.intents first would fail.
+    if os.getenv("AGENT_RUNTIME", "adk").lower() == "mock_demo":
+        from app.runtime.mock_demo import MockDemoRuntime
+
         return MockDemoRuntime()
+
+    from app.runtime.adk import AdkRuntime
+
     return AdkRuntime()
