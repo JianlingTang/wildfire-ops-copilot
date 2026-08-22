@@ -19,6 +19,7 @@ ELASTIC_MCP_TOOL_NAME="${ELASTIC_MCP_TOOL_NAME:-platform_core_search}"
 ELASTIC_KIBANA_URL_SECRET="${ELASTIC_KIBANA_URL_SECRET:-elastic-kibana-url}"
 ELASTIC_API_KEY_SECRET="${ELASTIC_API_KEY_SECRET:-elastic-api-key}"
 ELASTIC_MCP_URL_SECRET="${ELASTIC_MCP_URL_SECRET:-}"
+API_AUTH_TOKEN_SECRET="${API_AUTH_TOKEN_SECRET:-wildfire-api-auth-token}"
 
 gcloud config set project "${PROJECT_ID}"
 
@@ -78,12 +79,24 @@ gcloud builds submit \
 SECRET_ARGS=()
 if gcloud secrets describe "${ELASTIC_KIBANA_URL_SECRET}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
   SECRET_ARGS+=(--set-secrets "KIBANA_URL=${ELASTIC_KIBANA_URL_SECRET}:latest")
+elif [ "${ELASTIC_EVIDENCE_PROVIDER}" = "real" ]; then
+  echo "Error: Secret ${ELASTIC_KIBANA_URL_SECRET} is required when ELASTIC_EVIDENCE_PROVIDER=real." >&2
+  exit 1
 fi
 if gcloud secrets describe "${ELASTIC_API_KEY_SECRET}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
   SECRET_ARGS+=(--set-secrets "ELASTIC_API_KEY=${ELASTIC_API_KEY_SECRET}:latest")
+elif [ "${ELASTIC_EVIDENCE_PROVIDER}" = "real" ]; then
+  echo "Error: Secret ${ELASTIC_API_KEY_SECRET} is required when ELASTIC_EVIDENCE_PROVIDER=real." >&2
+  exit 1
 fi
 if [ -n "${ELASTIC_MCP_URL_SECRET}" ] && gcloud secrets describe "${ELASTIC_MCP_URL_SECRET}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
   SECRET_ARGS+=(--set-secrets "ELASTIC_MCP_URL=${ELASTIC_MCP_URL_SECRET}:latest")
+fi
+if gcloud secrets describe "${API_AUTH_TOKEN_SECRET}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+  SECRET_ARGS+=(--set-secrets "API_AUTH_TOKEN=${API_AUTH_TOKEN_SECRET}:latest")
+else
+  echo "Error: Secret ${API_AUTH_TOKEN_SECRET} is required for Cloud Run API auth." >&2
+  exit 1
 fi
 
 gcloud run deploy "${SERVICE_NAME}" \

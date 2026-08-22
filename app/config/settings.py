@@ -28,6 +28,8 @@ class Settings:
     app_name: str = "Wildfire Ops Copilot"
     app_version: str = "0.1.0"
     cors_origins: list[str] = field(default_factory=_default_cors_origins)
+    api_auth_token: str = field(default_factory=lambda: os.getenv("API_AUTH_TOKEN", "").strip())
+    max_request_body_bytes: int = 64 * 1024
     demo_region_id: str = "live_australia"
     demo_region_name: str = "Australia Live Hotspot AOI"
 
