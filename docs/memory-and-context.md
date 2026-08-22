@@ -89,9 +89,8 @@
 **已修**:会话 ID 一律服务端生成;只有归属匹配才能恢复已有会话;未知或非本人的 ID
 静默开新会话(不报错,避免被用来探测哪些 ID 存在)。补了 4 个回归测试。
 
-⚠️ 注意:`ChatRequest.user_id` **仍然来自请求体**,默认值对所有人都是 `"demo_officer"`,
-而 `app/api/chat.py` 没有读取已验证的身份。所以这层归属检查目前**只挡住误撞,挡不住伪造**。
-补法见 1.7 末尾。
+这层归属检查依赖 `ChatRequest.user_id` 可信。**该前提现在成立了** —— chat 处理器已改为
+用已验证 token 的身份覆盖请求体里的 `user_id`,见 1.7。
 
 ## 1.7 已落地:Firebase 身份认证(并行工作)
 
@@ -114,11 +113,23 @@
 - 审批**要求 admin 角色**,普通 operator 无法批准
 - 客户端传的 `payload.actor` 只在鉴权关闭(本地开发)时才被采用
 
+**Chat 链路的身份也已经收口。** `app/api/chat.py` 的 `_chat_user_id()` 走同一个套路:
+鉴权启用时用 `get_authenticated_user(request).email` 覆盖请求体里的 `user_id`,
+客户端传什么都不作数;鉴权关闭时(本地开发)才沿用请求体的值。
+
+用 email 而不是 uid,是为了和审批链路的 `actor` 可比 —— `action.requested_by` 与
+`approval.approved_by` 现在是同一种标识,将来要加「申请人 ≠ 批准人」的职责分离检查,
+可以直接比较。
+
+三个回归测试覆盖:客户端伪造的 `user_id` 被忽略、鉴权关闭时保留请求体的值、
+以及持有合法 token 的另一用户即使同时伪造 `conversation_id` 和 `user_id`
+也拿不到别人的对话记录。
+
 ### 仍未补齐的两点
 
-1. **`ChatRequest.user_id` 还是客户端说了算。** `app/api/chat.py` 没有读
-   `request.state.auth_user`,所以对话归属仍可被伪造。修法很小:在 chat 处理器里
-   用已验证用户覆盖 `user_id`,和 `_decision_actor` 同一个套路。
+1. **`alerts.py` 还有同一个洞。** `acknowledge_alert()` 直接用
+   `request.actor`(`AcknowledgeAlertRequest` 的字段,默认 `"demo_officer"`)
+   写入审计日志,没有读已验证身份。和 chat 是完全相同的一行修法。
 2. **WebSocket 的 token 走 query 参数**(`?id_token=...`)。query string 会进访问日志,
    凭据不该出现在那里。可改为握手后首帧发送,或用短时效的一次性票据。
 
@@ -662,13 +673,14 @@ Cloud Run 按实例数计费,作品集项目设 `--max-instances 2` 就够了。
 | 12 | 监控循环改 Cloud Scheduler(兼做保活) | 省钱 + 无状态 + 冷启动 | 半天 |
 | 13 | Firestore TTL 策略 + 审计写 BigQuery | 自动清理;审计长留 | 半天 |
 | 14 | ~~身份认证:审批 `actor` 从 token 取 + 要求 admin~~ | 审批链路不再可伪造 | ✅ 已完成(见 1.7) |
-| 15 | chat 处理器用已验证身份覆盖 `ChatRequest.user_id` | 让 1.6 的归属检查真正有效 | **1 小时** |
-| 16 | WebSocket token 移出 query 参数 | 凭据不进访问日志 | 半天 |
+| 15 | ~~chat 处理器用已验证身份覆盖 `ChatRequest.user_id`~~ | 1.6 的归属检查真正生效 | ✅ 已完成 |
+| 16 | `alerts.py` 的 `actor` 同样从 token 取 | 审计日志的操作人不再可伪造 | **1 小时** |
+| 17 | WebSocket token 移出 query 参数 | 凭据不进访问日志 | 半天 |
 
 **第 3、4 步今天就能做完,而且零成本** —— 它们直接解决你感知到的 10 秒卡顿。
 **第 5 步优先级最高**:679 MB 的解析峰值配 1Gi 内存和 concurrency 4,现在是随时会 OOM 的状态。
-第 11 步是解锁一切的关键。第 14 步(审批身份)已经完成,
-**第 15 步只要一小时,却是 1.6 那个修复真正生效的前提** —— 现在它只挡误撞。
+第 11 步是解锁一切的关键。身份认证部分(第 14、15 步)已经完成,
+**审批和对话两条链路的身份都不再可伪造**;剩下第 16、17 步是同一类收尾。
 
 ---
 
