@@ -15,13 +15,19 @@ def _reload_auth_modules() -> None:
 
 @pytest.fixture(autouse=True)
 def reset_api_auth_settings(monkeypatch):
+    monkeypatch.delenv("API_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    _reload_auth_modules()
     yield
     monkeypatch.delenv("API_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
     _reload_auth_modules()
 
 
-def reload_auth_settings(monkeypatch, token: str) -> None:
-    monkeypatch.setenv("API_AUTH_TOKEN", token)
+def reload_auth_settings(monkeypatch) -> None:
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "wildfireops-test")
     _reload_auth_modules()
 
 
@@ -33,8 +39,8 @@ def test_api_routes_allow_requests_when_auth_token_is_not_configured() -> None:
     assert response.status_code == 200
 
 
-def test_api_routes_require_configured_auth_token(monkeypatch) -> None:
-    reload_auth_settings(monkeypatch, "secret-token")
+def test_api_routes_require_configured_firebase_auth(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
     client = TestClient(app)
 
     response = client.get("/api/hotspots/overview")
@@ -43,26 +49,32 @@ def test_api_routes_require_configured_auth_token(monkeypatch) -> None:
     assert response.json()["detail"] == "Invalid or missing API credentials"
 
 
-def test_api_routes_accept_x_api_key(monkeypatch) -> None:
-    reload_auth_settings(monkeypatch, "secret-token")
+def test_api_routes_accept_valid_firebase_bearer_token(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+    monkeypatch.setattr(api_auth_module.id_token, "verify_firebase_token", lambda *args, **kwargs: {"uid": "user-1"})
     client = TestClient(app)
 
-    response = client.get("/api/hotspots/overview", headers={"X-API-Key": "secret-token"})
+    response = client.get("/api/hotspots/overview", headers={"Authorization": "Bearer firebase-id-token"})
 
     assert response.status_code == 200
 
 
-def test_api_routes_accept_bearer_token(monkeypatch) -> None:
-    reload_auth_settings(monkeypatch, "secret-token")
+def test_api_routes_reject_invalid_firebase_bearer_token(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+
+    def reject_token(*args, **kwargs):
+        raise ValueError("invalid token")
+
+    monkeypatch.setattr(api_auth_module.id_token, "verify_firebase_token", reject_token)
     client = TestClient(app)
 
-    response = client.get("/api/hotspots/overview", headers={"Authorization": "Bearer secret-token"})
+    response = client.get("/api/hotspots/overview", headers={"Authorization": "Bearer invalid-token"})
 
-    assert response.status_code == 200
+    assert response.status_code == 401
 
 
 def test_health_check_does_not_require_api_token(monkeypatch) -> None:
-    reload_auth_settings(monkeypatch, "secret-token")
+    reload_auth_settings(monkeypatch)
     client = TestClient(app)
 
     response = client.get("/health")

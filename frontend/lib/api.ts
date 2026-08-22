@@ -110,11 +110,13 @@ export type ApiEvidence = {
   [key: string]: any;
 };
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8001";
-const API_AUTH_TOKEN = process.env.NEXT_PUBLIC_API_AUTH_TOKEN ?? "";
+import { getFirebaseIdToken } from "./firebaseAuth";
 
-function apiHeaders(headers: HeadersInit = {}): HeadersInit {
-  return API_AUTH_TOKEN ? {...headers, "X-API-Key": API_AUTH_TOKEN} : headers;
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8001";
+
+async function apiHeaders(headers: HeadersInit = {}): Promise<HeadersInit> {
+  const idToken = await getFirebaseIdToken();
+  return idToken ? {...headers, Authorization: `Bearer ${idToken}`} : headers;
 }
 
 export type RiskRun = {
@@ -357,7 +359,7 @@ export type ApiChatMessage = {
 export async function startManualRun() {
   const response = await fetch(`${API_BASE_URL}/api/runs/manual`, {
     method: "POST",
-    headers: apiHeaders({"Content-Type": "application/json"}),
+    headers: await apiHeaders({"Content-Type": "application/json"}),
     body: JSON.stringify({region_id: "live_australia", region_name: "Australia Live Hotspot AOI"})
   });
   if (!response.ok) {
@@ -380,7 +382,7 @@ export async function sendChat(
   } = options;
   const response = await fetch(`${API_BASE_URL}/api/chat`, {
     method: "POST",
-    headers: apiHeaders({"Content-Type": "application/json"}),
+    headers: await apiHeaders({"Content-Type": "application/json"}),
     body: JSON.stringify({
       message,
       conversation_id: conversationId,
@@ -412,7 +414,7 @@ function roundMs(value: number) {
 }
 
 export async function getHotspotOverview(): Promise<ApiHotspotOverview> {
-  const response = await fetch(`${API_BASE_URL}/api/hotspots/overview`, {headers: apiHeaders()});
+  const response = await fetch(`${API_BASE_URL}/api/hotspots/overview`, {headers: await apiHeaders()});
   if (!response.ok) {
     throw new Error("Failed to load hotspot overview");
   }
@@ -421,7 +423,7 @@ export async function getHotspotOverview(): Promise<ApiHotspotOverview> {
 
 export async function getHotspotFocus(state: string, radiusKm: number): Promise<ApiHotspotFocus> {
   const params = new URLSearchParams({state, radius_km: String(radiusKm)});
-  const response = await fetch(`${API_BASE_URL}/api/hotspots/focus?${params.toString()}`, {headers: apiHeaders()});
+  const response = await fetch(`${API_BASE_URL}/api/hotspots/focus?${params.toString()}`, {headers: await apiHeaders()});
   if (!response.ok) {
     throw new Error("Failed to load hotspot focus");
   }
@@ -429,7 +431,7 @@ export async function getHotspotFocus(state: string, radiusKm: number): Promise<
 }
 
 export async function getRunEvents(runId: string): Promise<{events: ApiTraceEvent[]}> {
-  const response = await fetch(`${API_BASE_URL}/api/runs/${runId}/events`, {headers: apiHeaders()});
+  const response = await fetch(`${API_BASE_URL}/api/runs/${runId}/events`, {headers: await apiHeaders()});
   if (!response.ok) {
     throw new Error("Failed to load run events");
   }
@@ -438,23 +440,24 @@ export async function getRunEvents(runId: string): Promise<{events: ApiTraceEven
 
 export async function getRecentAgentEvents(limit = 20): Promise<{events: ApiAgentEvent[]}> {
   const params = new URLSearchParams({limit: String(limit)});
-  const response = await fetch(`${API_BASE_URL}/api/agent-events/recent?${params.toString()}`, {headers: apiHeaders()});
+  const response = await fetch(`${API_BASE_URL}/api/agent-events/recent?${params.toString()}`, {headers: await apiHeaders()});
   if (!response.ok) {
     throw new Error("Failed to load agent activity");
   }
   return response.json();
 }
 
-export function getAgentEventsWebSocketUrl() {
+export async function getAgentEventsWebSocketUrl() {
   const base = new URL(API_BASE_URL);
   base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
   base.pathname = "/api/agent-events/ws";
-  base.search = API_AUTH_TOKEN ? new URLSearchParams({api_key: API_AUTH_TOKEN}).toString() : "";
+  const idToken = await getFirebaseIdToken();
+  base.search = idToken ? new URLSearchParams({id_token: idToken}).toString() : "";
   return base.toString();
 }
 
 export async function getAlerts(): Promise<{alerts: ApiAlert[]}> {
-  const response = await fetch(`${API_BASE_URL}/api/alerts`, {headers: apiHeaders()});
+  const response = await fetch(`${API_BASE_URL}/api/alerts`, {headers: await apiHeaders()});
   if (!response.ok) {
     throw new Error("Failed to load alerts");
   }
@@ -462,7 +465,7 @@ export async function getAlerts(): Promise<{alerts: ApiAlert[]}> {
 }
 
 export async function getActions(): Promise<{actions: ApiAction[]; approvals: ApiApproval[]}> {
-  const response = await fetch(`${API_BASE_URL}/api/actions`, {headers: apiHeaders()});
+  const response = await fetch(`${API_BASE_URL}/api/actions`, {headers: await apiHeaders()});
   if (!response.ok) {
     throw new Error("Failed to load actions");
   }
@@ -472,7 +475,7 @@ export async function getActions(): Promise<{actions: ApiAction[]; approvals: Ap
 export async function approveAction(actionId: string, actor = "demo_officer"): Promise<{action: ApiAction; approval: ApiApproval}> {
   const response = await fetch(`${API_BASE_URL}/api/actions/${actionId}/approve`, {
     method: "POST",
-    headers: apiHeaders({"Content-Type": "application/json"}),
+    headers: await apiHeaders({"Content-Type": "application/json"}),
     body: JSON.stringify({actor})
   });
   if (!response.ok) {
@@ -484,7 +487,7 @@ export async function approveAction(actionId: string, actor = "demo_officer"): P
 export async function rejectAction(actionId: string, actor = "demo_officer"): Promise<{action: ApiAction; approval: ApiApproval}> {
   const response = await fetch(`${API_BASE_URL}/api/actions/${actionId}/reject`, {
     method: "POST",
-    headers: apiHeaders({"Content-Type": "application/json"}),
+    headers: await apiHeaders({"Content-Type": "application/json"}),
     body: JSON.stringify({actor})
   });
   if (!response.ok) {
@@ -494,7 +497,7 @@ export async function rejectAction(actionId: string, actor = "demo_officer"): Pr
 }
 
 export async function getMonitorTasks(): Promise<{monitor_tasks: ApiMonitorTask[]}> {
-  const response = await fetch(`${API_BASE_URL}/api/monitor-tasks`, {headers: apiHeaders()});
+  const response = await fetch(`${API_BASE_URL}/api/monitor-tasks`, {headers: await apiHeaders()});
   if (!response.ok) {
     throw new Error("Failed to load monitor tasks");
   }

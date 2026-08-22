@@ -1,20 +1,13 @@
-from secrets import compare_digest
-
 from fastapi import HTTPException, Request, WebSocket, status
+from google.auth import exceptions as google_auth_exceptions
+from google.auth.transport import requests as google_auth_requests
+from google.oauth2 import id_token
 
 from app.config.settings import settings
 
-API_AUTH_HEADER = "x-api-key"
-
 
 def is_api_auth_enabled() -> bool:
-    return bool(settings.api_auth_token)
-
-
-def _is_valid_token(token: str | None) -> bool:
-    if not settings.api_auth_token or not token:
-        return False
-    return compare_digest(token, settings.api_auth_token)
+    return bool(settings.firebase_project_id)
 
 
 def _bearer_token(authorization: str | None) -> str | None:
@@ -36,8 +29,8 @@ def _is_allowed_origin(origin: str | None) -> bool:
 def verify_api_request(request: Request) -> None:
     if not is_api_auth_enabled():
         return
-    token = request.headers.get(API_AUTH_HEADER) or _bearer_token(request.headers.get("authorization"))
-    if not _is_valid_token(token):
+    token = _bearer_token(request.headers.get("authorization"))
+    if not _is_valid_firebase_token(token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API credentials")
 
 
@@ -47,8 +40,22 @@ async def verify_api_websocket(websocket: WebSocket) -> bool:
         return False
     if not is_api_auth_enabled():
         return True
-    token = websocket.query_params.get("api_key") or websocket.headers.get(API_AUTH_HEADER)
-    if _is_valid_token(token):
+    token = websocket.query_params.get("id_token")
+    if _is_valid_firebase_token(token):
         return True
     await websocket.close(code=1008)
     return False
+
+
+def _is_valid_firebase_token(token: str | None) -> bool:
+    if not settings.firebase_project_id or not token:
+        return False
+    try:
+        id_token.verify_firebase_token(
+            token,
+            google_auth_requests.Request(),
+            audience=settings.firebase_project_id,
+        )
+    except (ValueError, google_auth_exceptions.GoogleAuthError):
+        return False
+    return True

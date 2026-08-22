@@ -153,29 +153,33 @@ export default function Home() {
 
     void loadRecent();
 
-    try {
-      socket = new WebSocket(getAgentEventsWebSocketUrl());
-      socket.onmessage = (event) => {
-        try {
-          const parsed = JSON.parse(event.data) as ApiAgentEvent;
-          setAgentEvents((current) => upsertEvent([...current, parsed]).slice(-20));
-        } catch {
-          // Ignore malformed observability events.
-        }
-      };
-      socket.onerror = () => {
-        if (!pollTimer) {
-          pollTimer = window.setInterval(loadRecent, 2500);
-        }
-      };
-      socket.onclose = () => {
-        if (!cancelled && !pollTimer) {
-          pollTimer = window.setInterval(loadRecent, 2500);
-        }
-      };
-    } catch {
-      pollTimer = window.setInterval(loadRecent, 2500);
+    async function connectStream() {
+      try {
+        socket = new WebSocket(await getAgentEventsWebSocketUrl());
+        socket.onmessage = (event) => {
+          try {
+            const parsed = JSON.parse(event.data) as ApiAgentEvent;
+            setAgentEvents((current) => upsertEvent([...current, parsed]).slice(-20));
+          } catch {
+            // Ignore malformed observability events.
+          }
+        };
+        socket.onerror = () => {
+          if (!pollTimer) {
+            pollTimer = window.setInterval(loadRecent, 2500);
+          }
+        };
+        socket.onclose = () => {
+          if (!cancelled && !pollTimer) {
+            pollTimer = window.setInterval(loadRecent, 2500);
+          }
+        };
+      } catch {
+        pollTimer = window.setInterval(loadRecent, 2500);
+      }
     }
+
+    void connectStream();
 
     return () => {
       cancelled = true;
