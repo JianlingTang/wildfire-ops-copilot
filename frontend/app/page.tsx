@@ -24,6 +24,7 @@ import {
   ApiMonitorTask,
   ApiReport,
   ApiRun,
+  ApiRequestError,
   ChatApiResult,
   getAgentEventsWebSocketUrl,
   getActions,
@@ -105,6 +106,7 @@ function OperationsConsole() {
   const [draftState, setDraftState] = useState("");
   const [draftRadiusKm, setDraftRadiusKm] = useState(50);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [agentEvents, setAgentEvents] = useState<ApiAgentEvent[]>([]);
 
   useEffect(() => {
@@ -118,6 +120,7 @@ function OperationsConsole() {
           return;
         }
         setOverview(payload);
+        setAccessNotice(null);
         setDraftState((current) => {
           if (current) {
             return current;
@@ -129,7 +132,11 @@ function OperationsConsole() {
         });
       } catch (error) {
         if (!cancelled) {
-          setLatestAnswer(error instanceof Error ? error.message : "Failed to load hotspot overview.");
+          const message = error instanceof Error ? error.message : "Failed to load hotspot overview.";
+          if (error instanceof ApiRequestError && error.status === 403) {
+            setAccessNotice(message);
+          }
+          setLatestAnswer(message);
         }
       } finally {
         if (!cancelled) {
@@ -353,11 +360,16 @@ function OperationsConsole() {
       try {
         const payload = await getHotspotFocus(draftStateSummary.state, draftRadiusKm);
         setFocus(payload);
+        setAccessNotice(null);
         setLatestAnswer(
           `${payload.data.label} is focused on its most active hotspot cluster at ${payload.data.radius_km} km. Run analysis from the AI chatbox to populate risk, warnings, and reports for this AOI.`
         );
       } catch (error) {
-        setLatestAnswer(error instanceof Error ? error.message : "Failed to focus the AOI.");
+        const message = error instanceof Error ? error.message : "Failed to focus the AOI.";
+        if (error instanceof ApiRequestError && error.status === 403) {
+          setAccessNotice(message);
+        }
+        setLatestAnswer(message);
       } finally {
         setFocusLoading(false);
       }
@@ -395,10 +407,6 @@ function OperationsConsole() {
         </div>
       ) : null}
 
-      {overviewLoading && !overview ? (
-        <LoadingHotspotsScreen />
-      ) : (
-        <>
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-background/95 backdrop-blur">
         <div className="flex h-16 items-center justify-between gap-4 px-4 lg:px-6">
           <div className="flex items-center gap-3">
@@ -442,6 +450,18 @@ function OperationsConsole() {
           </div>
         </div>
       </header>
+
+      {accessNotice ? (
+        <section className="border-b border-red-200 bg-red-50 px-4 py-3 text-red-950 lg:px-6" role="alert">
+          <div className="flex max-w-5xl items-start gap-3">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">Demo access not authorized</div>
+              <div className="mt-1 text-sm leading-5 text-red-900">{accessNotice}</div>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <div className="p-4 lg:p-5">
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-[232px_minmax(0,1fr)]">
@@ -561,8 +581,6 @@ function OperationsConsole() {
           </div>
         </section>
       </div>
-        </>
-      )}
     </main>
   );
 }
@@ -628,23 +646,6 @@ function AgentActivityRow({event}: {event: ApiAgentEvent}) {
             <div className="mt-1 truncate text-xs text-slate-500">{String(event.data.output_summary)}</div>
           ) : null}
           {artifact ? <Badge className="mt-2" variant="muted">{String(artifact)}</Badge> : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LoadingHotspotsScreen() {
-  return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white px-6 py-6 text-center shadow-sm">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md border border-orange-200 bg-orange-50">
-          <Flame className="h-6 w-6 animate-pulse text-orange-700" />
-        </div>
-        <div className="mt-4 text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Loading hotspots</div>
-        <div className="mt-2 text-xl font-semibold text-slate-950">Preparing the operations console</div>
-        <div className="mt-2 text-sm leading-6 text-slate-500">
-          Fetching active hotspot detections, state summaries, and AOI focus options.
         </div>
       </div>
     </div>
