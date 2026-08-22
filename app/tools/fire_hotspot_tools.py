@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from collections import defaultdict
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -45,10 +46,21 @@ STATE_FOCUS_DEFAULTS = {
     "TAS": (-42.0409, 146.8087),
 }
 OVERVIEW_RADIUS_OPTIONS_KM = [30, 50, 100, 200]
-OVERVIEW_CACHE_TTL_SECONDS = 180
+DEA_REFRESH_INTERVAL_SECONDS = 600
 OVERVIEW_MAP_HOTSPOT_LIMIT = 2400
 FOCUS_MAP_HOTSPOT_LIMIT = 1600
-_AUSTRALIA_OVERVIEW_CACHE: dict[str, Any] = {"expires_at": None, "payload": None, "rows": None}
+_AUSTRALIA_OVERVIEW_CACHE: dict[str, Any] = {
+    "etag": None,
+    "last_modified": None,
+    "last_checked_at": None,
+    "last_refreshed_at": None,
+    "next_refresh_at": None,
+    "payload": None,
+    "refresh_error": None,
+    "refreshing": False,
+    "rows": None,
+}
+_AUSTRALIA_OVERVIEW_CACHE_LOCK = threading.Lock()
 
 
 def get_fire_hotspots(aoi: Aoi | dict, time_window: str = "24h") -> dict:
@@ -58,49 +70,27 @@ def get_fire_hotspots(aoi: Aoi | dict, time_window: str = "24h") -> dict:
     if external_data_mode() == "demo":
         return _demo_hotspots(time_window)
 
-    errors: list[str] = []
-    nasa_key = _nasa_firms_api_key()
-    if nasa_key:
-        try:
-            return _fetch_nasa_firms_hotspots(aoi, nasa_key, time_window)
-        except Exception as exc:
-            errors.append(f"NASA FIRMS failed: {exc}")
-
     try:
         return _fetch_dea_hotspots(aoi, time_window)
     except Exception as exc:
-        errors.append(f"DEA Hotspots failed: {exc}")
-
-    return {"status": "error", "message": "; ".join(errors) or "No live hotspot provider succeeded."}
+        return {"status": "error", "message": f"Live hotspot cache unavailable: {exc}"}
 
 
 def get_australia_hotspots_overview() -> dict:
-    cached = _get_cached_australia_overview()
-    if cached:
-        cached["cached"] = True
-        return cached
-
     if external_data_mode() == "demo":
         payload = _demo_australia_hotspot_overview()
         _store_cached_australia_overview(payload, _demo_australia_hotspot_rows())
         return payload
 
-    try:
-        rows = _fetch_australia_hotspot_rows()
-        payload = _build_australia_hotspot_overview(
-            rows,
-            mode="live",
-            source="DEA Hotspots recent feed",
-        )
-        _store_cached_australia_overview(payload, rows)
-        return payload
-    except Exception as exc:
-        stale = _get_cached_australia_overview(include_stale=True)
-        if stale:
-            stale["cached"] = True
-            stale["message"] = f"Serving cached Australia hotspot overview after refresh failure: {exc}"
-            return stale
-        return {"status": "error", "message": f"Live hotspot overview failed: {exc}"}
+    cached = _get_cached_australia_overview(include_stale=True)
+    if cached:
+        cached["cached"] = True
+        return cached
+
+    return {
+        "status": "error",
+        "message": "Live DEA hotspot cache is not ready yet. Background ingestion has not completed.",
+    }
 
 
 def get_state_hotspot_focus(state: str, radius_km: int | float) -> dict:
@@ -138,7 +128,7 @@ def get_state_hotspot_focus(state: str, radius_km: int | float) -> dict:
         "mode": mode,
         "source": source,
         "cached": cached,
-        "cache_ttl_seconds": OVERVIEW_CACHE_TTL_SECONDS,
+        "cache_ttl_seconds": DEA_REFRESH_INTERVAL_SECONDS,
         "data": {
             "state": state_code,
             "label": STATE_LABELS[state_code],
@@ -360,12 +350,9 @@ def _fetch_nasa_firms_hotspots(aoi: Aoi | dict, api_key: str, time_window: str) 
 def _fetch_dea_hotspots(aoi: Aoi | dict, time_window: str) -> dict:
     latitude, longitude = coerce_center(aoi)
     radius_km = coerce_radius_km(aoi)
-    features = _fetch_dea_features()
+    rows, _, _, _ = _get_or_load_australia_hotspot_rows()
     filtered_rows: list[dict[str, Any]] = []
-    for feature in features:
-        row = _dea_feature_to_row(feature)
-        if not row:
-            continue
+    for row in rows:
         if haversine_km(latitude, longitude, row["lat"], row["lon"]) > radius_km:
             continue
         filtered_rows.append(row)
@@ -481,7 +468,7 @@ def _build_australia_hotspot_overview(
         "mode": mode,
         "source": source,
         "cached": False,
-        "cache_ttl_seconds": OVERVIEW_CACHE_TTL_SECONDS,
+        "cache_ttl_seconds": DEA_REFRESH_INTERVAL_SECONDS,
         "data": {
             "time_window": "24h",
             "updated_at": now.isoformat(),
@@ -497,7 +484,7 @@ def _build_australia_hotspot_overview(
 
 
 def _select_live_hotspot_region() -> dict[str, Any]:
-    rows = [row for row in (_dea_feature_to_row(feature) for feature in _fetch_dea_features()) if row]
+    rows, _, _, _ = _get_or_load_australia_hotspot_rows()
     if not rows:
         raise ValueError("DEA Hotspots feed returned no usable hotspot rows.")
 
@@ -576,19 +563,89 @@ def _parse_nasa_csv(text: str) -> list[dict[str, Any]]:
     return rows
 
 
-def _fetch_dea_features() -> list[dict[str, Any]]:
+def refresh_dea_hotspot_cache(force: bool = False) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with _AUSTRALIA_OVERVIEW_CACHE_LOCK:
+        next_refresh_at = _AUSTRALIA_OVERVIEW_CACHE.get("next_refresh_at")
+        if (
+            not force
+            and isinstance(next_refresh_at, datetime)
+            and next_refresh_at > now
+            and _AUSTRALIA_OVERVIEW_CACHE.get("payload") is not None
+        ):
+            return {"status": "skipped", "reason": "fresh"}
+        if _AUSTRALIA_OVERVIEW_CACHE.get("refreshing"):
+            return {"status": "skipped", "reason": "refresh_in_progress"}
+        _AUSTRALIA_OVERVIEW_CACHE["refreshing"] = True
+        etag = _AUSTRALIA_OVERVIEW_CACHE.get("etag")
+        last_modified = _AUSTRALIA_OVERVIEW_CACHE.get("last_modified")
+
+    headers = {"User-Agent": http_user_agent()}
+    if etag:
+        headers["If-None-Match"] = str(etag)
+    if last_modified:
+        headers["If-Modified-Since"] = str(last_modified)
+
+    try:
+        features, response_headers, status_code = _fetch_dea_features(headers=headers)
+        now = datetime.now(UTC)
+        if status_code == 304:
+            with _AUSTRALIA_OVERVIEW_CACHE_LOCK:
+                _AUSTRALIA_OVERVIEW_CACHE["last_checked_at"] = now
+                _AUSTRALIA_OVERVIEW_CACHE["next_refresh_at"] = now + timedelta(seconds=DEA_REFRESH_INTERVAL_SECONDS)
+                _AUSTRALIA_OVERVIEW_CACHE["refresh_error"] = None
+                _AUSTRALIA_OVERVIEW_CACHE["refreshing"] = False
+            return {"status": "not_modified"}
+
+        rows = [row for row in (_dea_feature_to_row(feature) for feature in features) if row]
+        if not rows:
+            raise ValueError("DEA Hotspots feed returned no usable hotspot rows.")
+        payload = _build_australia_hotspot_overview(
+            rows,
+            mode="live",
+            source="DEA Hotspots recent feed",
+        )
+        _store_cached_australia_overview(
+            payload,
+            rows,
+            etag=response_headers.get("etag"),
+            last_modified=response_headers.get("last-modified"),
+        )
+        return {"status": "refreshed", "row_count": len(rows)}
+    except Exception as exc:
+        failed_at = datetime.now(UTC)
+        with _AUSTRALIA_OVERVIEW_CACHE_LOCK:
+            _AUSTRALIA_OVERVIEW_CACHE["last_checked_at"] = failed_at
+            _AUSTRALIA_OVERVIEW_CACHE["next_refresh_at"] = failed_at + timedelta(seconds=DEA_REFRESH_INTERVAL_SECONDS)
+            _AUSTRALIA_OVERVIEW_CACHE["refresh_error"] = str(exc)
+            _AUSTRALIA_OVERVIEW_CACHE["refreshing"] = False
+        raise
+
+
+def seconds_until_dea_refresh() -> float:
+    with _AUSTRALIA_OVERVIEW_CACHE_LOCK:
+        next_refresh_at = _AUSTRALIA_OVERVIEW_CACHE.get("next_refresh_at")
+    if not isinstance(next_refresh_at, datetime):
+        return 0.0
+    return max(0.0, (next_refresh_at - datetime.now(UTC)).total_seconds())
+
+
+def _fetch_dea_features(*, headers: dict[str, str] | None = None) -> tuple[list[dict[str, Any]], httpx.Headers, int]:
     response = httpx.get(
         DEA_HOTSPOTS_URL,
-        headers={"User-Agent": http_user_agent()},
+        headers=headers or {"User-Agent": http_user_agent()},
         timeout=request_timeout_seconds(default=15.0),
     )
+    if response.status_code == 304:
+        return [], response.headers, response.status_code
     response.raise_for_status()
     payload = response.json()
-    return payload.get("features", [])
+    return payload.get("features", []), response.headers, response.status_code
 
 
 def _fetch_australia_hotspot_rows() -> list[dict[str, Any]]:
-    return [row for row in (_dea_feature_to_row(feature) for feature in _fetch_dea_features()) if row]
+    features, _, _ = _fetch_dea_features()
+    return [row for row in (_dea_feature_to_row(feature) for feature in features) if row]
 
 
 def _dea_feature_to_row(feature: dict[str, Any]) -> dict[str, Any] | None:
@@ -756,42 +813,48 @@ def _state_code_from_region_id(region_id: str) -> str | None:
 
 
 def _get_cached_australia_overview(include_stale: bool = False) -> dict | None:
-    payload = _AUSTRALIA_OVERVIEW_CACHE.get("payload")
-    expires_at = _AUSTRALIA_OVERVIEW_CACHE.get("expires_at")
+    with _AUSTRALIA_OVERVIEW_CACHE_LOCK:
+        payload = _AUSTRALIA_OVERVIEW_CACHE.get("payload")
+        refresh_error = _AUSTRALIA_OVERVIEW_CACHE.get("refresh_error")
     if not payload:
         return None
-    if include_stale or (isinstance(expires_at, datetime) and expires_at > datetime.now(UTC)):
-        return deepcopy(payload)
-    return None
+    cached = deepcopy(payload)
+    if include_stale and refresh_error:
+        cached["message"] = f"Serving cached Australia hotspot overview after refresh failure: {refresh_error}"
+    return cached
 
 
 def _get_cached_australia_rows(include_stale: bool = False) -> list[dict[str, Any]] | None:
-    rows = _AUSTRALIA_OVERVIEW_CACHE.get("rows")
-    expires_at = _AUSTRALIA_OVERVIEW_CACHE.get("expires_at")
+    with _AUSTRALIA_OVERVIEW_CACHE_LOCK:
+        rows = _AUSTRALIA_OVERVIEW_CACHE.get("rows")
     if not rows:
         return None
-    if include_stale or (isinstance(expires_at, datetime) and expires_at > datetime.now(UTC)):
-        return deepcopy(rows)
-    return None
+    return deepcopy(rows)
 
 
-def _store_cached_australia_overview(payload: dict, rows: list[dict[str, Any]]) -> None:
-    _AUSTRALIA_OVERVIEW_CACHE["payload"] = deepcopy(payload)
-    _AUSTRALIA_OVERVIEW_CACHE["rows"] = deepcopy(rows)
-    _AUSTRALIA_OVERVIEW_CACHE["expires_at"] = datetime.now(UTC) + timedelta(seconds=OVERVIEW_CACHE_TTL_SECONDS)
+def _store_cached_australia_overview(
+    payload: dict,
+    rows: list[dict[str, Any]],
+    *,
+    etag: str | None = None,
+    last_modified: str | None = None,
+) -> None:
+    now = datetime.now(UTC)
+    with _AUSTRALIA_OVERVIEW_CACHE_LOCK:
+        _AUSTRALIA_OVERVIEW_CACHE["payload"] = deepcopy(payload)
+        _AUSTRALIA_OVERVIEW_CACHE["rows"] = deepcopy(rows)
+        if etag:
+            _AUSTRALIA_OVERVIEW_CACHE["etag"] = etag
+        if last_modified:
+            _AUSTRALIA_OVERVIEW_CACHE["last_modified"] = last_modified
+        _AUSTRALIA_OVERVIEW_CACHE["last_checked_at"] = now
+        _AUSTRALIA_OVERVIEW_CACHE["last_refreshed_at"] = now
+        _AUSTRALIA_OVERVIEW_CACHE["next_refresh_at"] = now + timedelta(seconds=DEA_REFRESH_INTERVAL_SECONDS)
+        _AUSTRALIA_OVERVIEW_CACHE["refresh_error"] = None
+        _AUSTRALIA_OVERVIEW_CACHE["refreshing"] = False
 
 
 def _get_or_load_australia_hotspot_rows() -> tuple[list[dict[str, Any]], str, str, bool]:
-    cached_rows = _get_cached_australia_rows()
-    cached_payload = _get_cached_australia_overview()
-    if cached_rows and cached_payload:
-        return (
-            cached_rows,
-            str(cached_payload.get("mode", "live")),
-            str(cached_payload.get("source", "DEA Hotspots recent feed")),
-            True,
-        )
-
     if external_data_mode() == "demo":
         rows = _demo_australia_hotspot_rows()
         payload = _build_australia_hotspot_overview(
@@ -802,14 +865,17 @@ def _get_or_load_australia_hotspot_rows() -> tuple[list[dict[str, Any]], str, st
         _store_cached_australia_overview(payload, rows)
         return rows, "demo", "DEA Hotspots demo overview", False
 
-    rows = _fetch_australia_hotspot_rows()
-    payload = _build_australia_hotspot_overview(
-        rows,
-        mode="live",
-        source="DEA Hotspots recent feed",
-    )
-    _store_cached_australia_overview(payload, rows)
-    return rows, "live", "DEA Hotspots recent feed", False
+    cached_rows = _get_cached_australia_rows(include_stale=True)
+    cached_payload = _get_cached_australia_overview(include_stale=True)
+    if cached_rows and cached_payload:
+        return (
+            cached_rows,
+            str(cached_payload.get("mode", "live")),
+            str(cached_payload.get("source", "DEA Hotspots recent feed")),
+            True,
+        )
+
+    raise RuntimeError("Live DEA hotspot cache is not ready yet. Background ingestion has not completed.")
 
 
 def _demo_australia_hotspot_rows() -> list[dict[str, Any]]:

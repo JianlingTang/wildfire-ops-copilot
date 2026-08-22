@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import threading
 from datetime import UTC, datetime, timedelta
 from html import unescape
 from typing import Any
@@ -17,11 +19,21 @@ from app.tools.provider_utils import (
 )
 
 NSW_RFS_INCIDENTS_URL = "https://www.rfs.nsw.gov.au/feeds/majorIncidents.json"
+NSW_RFS_DEFAULT_REFRESH_SECONDS = 30
 WARNING_LEVELS = {
     "Emergency Warning": "EMERGENCY_WARNING",
     "Watch and Act": "WATCH_AND_ACT",
     "Advice": "ADVICE",
 }
+_NSW_RFS_CACHE: dict[str, Any] = {
+    "payload": None,
+    "last_checked_at": None,
+    "last_refreshed_at": None,
+    "next_refresh_at": None,
+    "refresh_error": None,
+    "refreshing": False,
+}
+_NSW_RFS_CACHE_LOCK = threading.Lock()
 
 
 def get_official_fire_warnings(region_id: str, aoi: Aoi | dict | None = None) -> dict:
@@ -51,13 +63,69 @@ def get_official_fire_warnings(region_id: str, aoi: Aoi | dict | None = None) ->
 
 
 def _fetch_nsw_rfs_warnings(region_id: str, aoi: Aoi | dict | None) -> dict:
-    response = httpx.get(
-        NSW_RFS_INCIDENTS_URL,
-        headers={"User-Agent": http_user_agent()},
-        timeout=request_timeout_seconds(default=12.0),
-    )
-    response.raise_for_status()
-    payload = response.json()
+    payload = _get_cached_nsw_rfs_payload()
+    if payload is None:
+        raise RuntimeError("Live NSW RFS warning cache is not ready yet. Background ingestion has not completed.")
+    return _format_nsw_rfs_warnings(region_id, aoi, payload)
+
+
+def refresh_nsw_rfs_warning_cache(force: bool = False) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with _NSW_RFS_CACHE_LOCK:
+        next_refresh_at = _NSW_RFS_CACHE.get("next_refresh_at")
+        if (
+            not force
+            and isinstance(next_refresh_at, datetime)
+            and next_refresh_at > now
+            and _NSW_RFS_CACHE.get("payload") is not None
+        ):
+            return {"status": "skipped", "reason": "fresh"}
+        if _NSW_RFS_CACHE.get("refreshing"):
+            return {"status": "skipped", "reason": "refresh_in_progress"}
+        _NSW_RFS_CACHE["refreshing"] = True
+
+    try:
+        response = httpx.get(
+            NSW_RFS_INCIDENTS_URL,
+            headers={"User-Agent": http_user_agent()},
+            timeout=request_timeout_seconds(default=12.0),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        max_age = _cache_control_max_age(response.headers.get("cache-control")) or NSW_RFS_DEFAULT_REFRESH_SECONDS
+        now = datetime.now(UTC)
+        with _NSW_RFS_CACHE_LOCK:
+            _NSW_RFS_CACHE["payload"] = payload
+            _NSW_RFS_CACHE["last_checked_at"] = now
+            _NSW_RFS_CACHE["last_refreshed_at"] = now
+            _NSW_RFS_CACHE["next_refresh_at"] = now + timedelta(seconds=max_age)
+            _NSW_RFS_CACHE["refresh_error"] = None
+            _NSW_RFS_CACHE["refreshing"] = False
+        return {"status": "refreshed", "max_age_seconds": max_age}
+    except Exception as exc:
+        with _NSW_RFS_CACHE_LOCK:
+            _NSW_RFS_CACHE["last_checked_at"] = datetime.now(UTC)
+            _NSW_RFS_CACHE["next_refresh_at"] = datetime.now(UTC) + timedelta(seconds=NSW_RFS_DEFAULT_REFRESH_SECONDS)
+            _NSW_RFS_CACHE["refresh_error"] = str(exc)
+            _NSW_RFS_CACHE["refreshing"] = False
+        raise
+
+
+def seconds_until_nsw_rfs_refresh() -> float:
+    with _NSW_RFS_CACHE_LOCK:
+        next_refresh_at = _NSW_RFS_CACHE.get("next_refresh_at")
+    if not isinstance(next_refresh_at, datetime):
+        return 0.0
+    return max(0.0, (next_refresh_at - datetime.now(UTC)).total_seconds())
+
+
+def _get_cached_nsw_rfs_payload() -> dict[str, Any] | None:
+    with _NSW_RFS_CACHE_LOCK:
+        payload = _NSW_RFS_CACHE.get("payload")
+    return payload
+
+
+def _format_nsw_rfs_warnings(region_id: str, aoi: Aoi | dict | None, payload: dict[str, Any]) -> dict:
     relevant_incidents = _filter_relevant_incidents(payload.get("features", []), aoi)
     ranked = sorted(relevant_incidents, key=lambda incident: incident["severity_rank"], reverse=True)
     top_incident = ranked[0] if ranked else None
@@ -102,6 +170,15 @@ def _fetch_nsw_rfs_warnings(region_id: str, aoi: Aoi | dict | None) -> dict:
             ],
         },
     }
+
+
+def _cache_control_max_age(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = re.search(r"(?:^|,)\s*max-age\s*=\s*(\d+)\s*(?:,|$)", value, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return max(1, int(match.group(1)))
 
 
 def _filter_relevant_incidents(features: list[dict[str, Any]], aoi: Aoi | dict | None) -> list[dict[str, Any]]:

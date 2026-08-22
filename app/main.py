@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from app.api import actions, agent_events, alerts, chat, hotspots, monitor_tasks, reports, runs
 from app.config.settings import settings
 from app.services.api_auth import verify_api_request
+from app.services.live_feed_ingestion import start_live_feed_ingestion_loop
 from app.services.monitoring_tasks import start_monitor_loop
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
@@ -42,6 +43,7 @@ app.include_router(monitor_tasks.router, prefix="/api", dependencies=api_depende
 
 @app.on_event("startup")
 def startup() -> None:
+    start_live_feed_ingestion_loop()
     start_monitor_loop()
 
 
