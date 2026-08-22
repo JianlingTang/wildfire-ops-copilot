@@ -18,16 +18,24 @@ def reset_api_auth_settings(monkeypatch):
     monkeypatch.delenv("API_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.delenv("AUTH_ALLOWED_EMAILS", raising=False)
+    monkeypatch.delenv("AUTH_ADMIN_EMAILS", raising=False)
+    monkeypatch.delenv("AUTH_REQUIRE_VERIFIED_EMAIL", raising=False)
     _reload_auth_modules()
     yield
     monkeypatch.delenv("API_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.delenv("AUTH_ALLOWED_EMAILS", raising=False)
+    monkeypatch.delenv("AUTH_ADMIN_EMAILS", raising=False)
+    monkeypatch.delenv("AUTH_REQUIRE_VERIFIED_EMAIL", raising=False)
     _reload_auth_modules()
 
 
-def reload_auth_settings(monkeypatch) -> None:
+def reload_auth_settings(monkeypatch, *, allowed: str = "operator@example.com", admins: str = "") -> None:
     monkeypatch.setenv("FIREBASE_PROJECT_ID", "wildfireops-test")
+    monkeypatch.setenv("AUTH_ALLOWED_EMAILS", allowed)
+    monkeypatch.setenv("AUTH_ADMIN_EMAILS", admins)
     _reload_auth_modules()
 
 
@@ -51,12 +59,44 @@ def test_api_routes_require_configured_firebase_auth(monkeypatch) -> None:
 
 def test_api_routes_accept_valid_firebase_bearer_token(monkeypatch) -> None:
     reload_auth_settings(monkeypatch)
-    monkeypatch.setattr(api_auth_module.id_token, "verify_firebase_token", lambda *args, **kwargs: {"uid": "user-1"})
+    monkeypatch.setattr(
+        api_auth_module.id_token,
+        "verify_firebase_token",
+        lambda *args, **kwargs: {"user_id": "user-1", "email": "operator@example.com", "email_verified": True},
+    )
     client = TestClient(app)
 
     response = client.get("/api/hotspots/overview", headers={"Authorization": "Bearer firebase-id-token"})
 
     assert response.status_code == 200
+
+
+def test_api_routes_reject_users_not_on_allowlist(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+    monkeypatch.setattr(
+        api_auth_module.id_token,
+        "verify_firebase_token",
+        lambda *args, **kwargs: {"user_id": "user-2", "email": "outsider@example.com", "email_verified": True},
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/hotspots/overview", headers={"Authorization": "Bearer firebase-id-token"})
+
+    assert response.status_code == 403
+
+
+def test_api_routes_reject_unverified_email_by_default(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+    monkeypatch.setattr(
+        api_auth_module.id_token,
+        "verify_firebase_token",
+        lambda *args, **kwargs: {"user_id": "user-3", "email": "operator@example.com", "email_verified": False},
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/hotspots/overview", headers={"Authorization": "Bearer firebase-id-token"})
+
+    assert response.status_code == 401
 
 
 def test_api_routes_reject_invalid_firebase_bearer_token(monkeypatch) -> None:

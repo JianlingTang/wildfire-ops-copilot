@@ -37,7 +37,7 @@ MCP search tool:
 - Tool: `search_wildfire_ops_knowledge`
 
 Store `elastic-kibana-url` and `elastic-api-key` in Secret Manager before deploy. If they already exist, add a new version.
-Set `FIREBASE_PROJECT_ID` in production to require Firebase ID tokens on `/api/*` routes. The static frontend should be built with the public Firebase web config values and must not embed backend API secrets.
+Set `FIREBASE_PROJECT_ID` and `AUTH_ALLOWED_EMAILS` in production to require Firebase ID tokens on `/api/*` routes and allow only named users. Put users allowed to approve/reject actions in `AUTH_ADMIN_EMAILS`. The static frontend should be built with the public Firebase web config values and must not embed backend API secrets.
 
 ## Smoke Test
 

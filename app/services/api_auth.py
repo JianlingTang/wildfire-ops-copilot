@@ -1,9 +1,19 @@
+from dataclasses import dataclass
+from typing import Any
+
 from fastapi import HTTPException, Request, WebSocket, status
 from google.auth import exceptions as google_auth_exceptions
 from google.auth.transport import requests as google_auth_requests
 from google.oauth2 import id_token
 
 from app.config.settings import settings
+
+
+@dataclass(frozen=True)
+class AuthUser:
+    uid: str
+    email: str
+    role: str
 
 
 def is_api_auth_enabled() -> bool:
@@ -30,8 +40,12 @@ def verify_api_request(request: Request) -> None:
     if not is_api_auth_enabled():
         return
     token = _bearer_token(request.headers.get("authorization"))
-    if not _is_valid_firebase_token(token):
+    user = _verified_auth_user(token)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API credentials")
+    if not _is_allowed_user(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not authorized for this app")
+    request.state.auth_user = user
 
 
 async def verify_api_websocket(websocket: WebSocket) -> bool:
@@ -41,21 +55,54 @@ async def verify_api_websocket(websocket: WebSocket) -> bool:
     if not is_api_auth_enabled():
         return True
     token = websocket.query_params.get("id_token")
-    if _is_valid_firebase_token(token):
+    user = _verified_auth_user(token)
+    if user is not None and _is_allowed_user(user):
         return True
     await websocket.close(code=1008)
     return False
 
 
-def _is_valid_firebase_token(token: str | None) -> bool:
+def get_authenticated_user(request: Request) -> AuthUser | None:
+    user = getattr(request.state, "auth_user", None)
+    return user if isinstance(user, AuthUser) else None
+
+
+def require_admin_user(request: Request) -> AuthUser:
+    user = get_authenticated_user(request)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role is required")
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role is required")
+    return user
+
+
+def _verified_auth_user(token: str | None) -> AuthUser | None:
     if not settings.firebase_project_id or not token:
-        return False
+        return None
     try:
-        id_token.verify_firebase_token(
+        claims = id_token.verify_firebase_token(
             token,
             google_auth_requests.Request(),
             audience=settings.firebase_project_id,
         )
     except (ValueError, google_auth_exceptions.GoogleAuthError):
-        return False
-    return True
+        return None
+    return _auth_user_from_claims(claims)
+
+
+def _auth_user_from_claims(claims: dict[str, Any]) -> AuthUser | None:
+    email = str(claims.get("email", "")).strip().lower()
+    if not email:
+        return None
+    if settings.auth_require_verified_email and claims.get("email_verified") is not True:
+        return None
+    uid = str(claims.get("user_id") or claims.get("sub") or "").strip()
+    if not uid:
+        return None
+    role = "admin" if email in settings.auth_admin_emails else "operator"
+    return AuthUser(uid=uid, email=email, role=role)
+
+
+def _is_allowed_user(user: AuthUser) -> bool:
+    allowed_emails = {*settings.auth_allowed_emails, *settings.auth_admin_emails}
+    return bool(allowed_emails) and user.email in allowed_emails

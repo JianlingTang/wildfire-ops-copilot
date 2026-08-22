@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CheckCircle2, CircleDashed, Clock3, Flame, TriangleAlert, X, XCircle } from "lucide-react";
 
 import { AgentChatBox } from "../components/AgentChatBox";
+import { AuthGate } from "../components/AuthGate";
 import { AoiSelectionToolbar } from "../components/AoiSelectionToolbar";
 import { EvidencePanel } from "../components/EvidencePanel";
 import { EmergencyRequestPanel } from "../components/EmergencyRequestPanel";
@@ -76,6 +77,14 @@ const supportMeta: Record<
 };
 
 export default function Home() {
+  return (
+    <AuthGate>
+      <OperationsConsole />
+    </AuthGate>
+  );
+}
+
+function OperationsConsole() {
   const mode = "demo";
   const aoiRef = useRef<HTMLDivElement | null>(null);
   const queueRef = useRef<HTMLDivElement | null>(null);
