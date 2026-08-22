@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.models.schemas import AcknowledgeAlertRequest
+from app.services.api_auth import authenticated_actor
 from app.services.firestore_store import store
 
 router = APIRouter(tags=["alerts"])
@@ -15,7 +16,10 @@ def list_alerts(status: str | None = None) -> dict:
 
 
 @router.post("/alerts/{alert_id}/acknowledge")
-def acknowledge_alert(alert_id: str, request: AcknowledgeAlertRequest) -> dict:
+def acknowledge_alert(alert_id: str, request: Request, payload: AcknowledgeAlertRequest) -> dict:
     if alert_id not in store.alerts:
         raise HTTPException(status_code=404, detail="Alert not found")
-    return {"alert": store.acknowledge_alert(alert_id, request.actor)}
+    # Acknowledging is routine operator work, so unlike approving an action it is not
+    # gated behind the admin role.
+    actor = authenticated_actor(request, payload.actor)
+    return {"alert": store.acknowledge_alert(alert_id, actor)}

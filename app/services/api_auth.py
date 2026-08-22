@@ -67,6 +67,23 @@ def get_authenticated_user(request: Request) -> AuthUser | None:
     return user if isinstance(user, AuthUser) else None
 
 
+def authenticated_actor(request: Request, fallback: str) -> str:
+    """Resolve who is acting, from the verified token rather than the request body.
+
+    Identity keys conversation ownership, an action's requested_by, and the audit log,
+    so a caller that could set it could read another operator's transcript or act in
+    their name. The fallback is only honoured when auth is switched off for local
+    development. Returns the email so every actor recorded across the app is the same
+    kind of identifier and can be compared.
+    """
+    if not is_api_auth_enabled():
+        return fallback
+    user = get_authenticated_user(request)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authenticated user is required")
+    return user.email
+
+
 def require_admin_user(request: Request) -> AuthUser:
     user = get_authenticated_user(request)
     if user is None:

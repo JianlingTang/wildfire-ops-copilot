@@ -187,3 +187,66 @@ def test_chat_conversation_cannot_be_hijacked_by_forging_a_user_id(monkeypatch) 
     # The intruder must not receive any of the owner's transcript.
     intruder_transcript = [message["content"] for message in intruder.json()["messages"]]
     assert "Analyze the Blue Mountains wildfire AOI" not in intruder_transcript
+
+
+def _seed_alert() -> str:
+    alert = store.create_alert(
+        {
+            "run_id": "run_test",
+            "region_id": "blue_mountains",
+            "region_name": "Blue Mountains",
+            "severity": "HIGH",
+            "reason": "test alert",
+            "evidence_ids": [],
+            "recommended_next_action": "review",
+        }
+    )
+    return alert.alert_id
+
+
+def _acknowledged_actors() -> list[str]:
+    return [log["actor"] for log in store.audit_logs if log["event_type"] == "ALERT_ACKNOWLEDGED"]
+
+
+def test_alert_acknowledgement_ignores_a_client_supplied_actor(monkeypatch) -> None:
+    reload_auth_settings(monkeypatch)
+    _accept_token_for(monkeypatch, "operator@example.com")
+    client = TestClient(app)
+    alert_id = _seed_alert()
+
+    response = client.post(
+        f"/api/alerts/{alert_id}/acknowledge",
+        json={"actor": "someone_else"},
+        headers={"Authorization": "Bearer firebase-id-token"},
+    )
+
+    assert response.status_code == 200
+    assert _acknowledged_actors() == ["operator@example.com"]
+
+
+def test_alert_acknowledgement_keeps_the_request_actor_when_auth_is_disabled() -> None:
+    client = TestClient(app)
+    alert_id = _seed_alert()
+
+    response = client.post(f"/api/alerts/{alert_id}/acknowledge", json={"actor": "local_dev"})
+
+    assert response.status_code == 200
+    assert _acknowledged_actors() == ["local_dev"]
+
+
+def test_alert_acknowledgement_does_not_require_an_admin(monkeypatch) -> None:
+    # Acknowledging an alert is routine operator work. Unlike approving an action,
+    # which sends something outward, it must not be gated behind the admin role.
+    reload_auth_settings(monkeypatch, allowed="operator@example.com", admins="chief@example.com")
+    _accept_token_for(monkeypatch, "operator@example.com")
+    client = TestClient(app)
+    alert_id = _seed_alert()
+
+    response = client.post(
+        f"/api/alerts/{alert_id}/acknowledge",
+        json={},
+        headers={"Authorization": "Bearer firebase-id-token"},
+    )
+
+    assert response.status_code == 200
+    assert _acknowledged_actors() == ["operator@example.com"]

@@ -125,13 +125,32 @@
 以及持有合法 token 的另一用户即使同时伪造 `conversation_id` 和 `user_id`
 也拿不到别人的对话记录。
 
-### 仍未补齐的两点
+**告警确认链路同样收口。** `alerts.py` 原先把 `AcknowledgeAlertRequest.actor`
+(默认 `"demo_officer"`)直接写进审计日志,现在也走已验证身份。
 
-1. **`alerts.py` 还有同一个洞。** `acknowledge_alert()` 直接用
-   `request.actor`(`AcknowledgeAlertRequest` 的字段,默认 `"demo_officer"`)
-   写入审计日志,没有读已验证身份。和 chat 是完全相同的一行修法。
-2. **WebSocket 的 token 走 query 参数**(`?id_token=...`)。query string 会进访问日志,
-   凭据不该出现在那里。可改为握手后首帧发送,或用短时效的一次性票据。
+这里有一个刻意的区分:**确认告警不要求 admin 角色**。批准行动会向外发出公众预警,
+所以要 admin;而"我看到了这条告警"是普通 operator 的日常工作,要求 admin 反而会挡住
+正常运作。有测试专门锁住这个行为。
+
+### 身份解析已收敛到一处
+
+三处相同的解析逻辑合并成了 `api_auth.authenticated_actor(request, fallback)`:
+
+| 调用方 | 用法 |
+|---|---|
+| `chat.py` | 覆盖 `ChatRequest.user_id` |
+| `alerts.py` | 决定审计日志的 `actor` |
+| `actions.py` | **不用它** —— 审批额外要求 admin,走 `require_admin_user` |
+
+「身份只来自 token,不来自请求体」这条规则现在只写在一个地方。三份拷贝的安全规则
+最容易在后续改动中悄悄漂移,而这里漂移的后果是静默的鉴权漏洞。
+
+`actions.py` 保持独立是有意的 —— 它的权限要求不同,硬塞进同一个函数就是错误的抽象。
+
+### 仍未补齐
+
+**WebSocket 的 token 走 query 参数**(`?id_token=...`)。query string 会进访问日志,
+凭据不该出现在那里。可改为握手后首帧发送,或用短时效的一次性票据。
 
 ## 1.8 顺带修复:循环导入
 
@@ -674,13 +693,13 @@ Cloud Run 按实例数计费,作品集项目设 `--max-instances 2` 就够了。
 | 13 | Firestore TTL 策略 + 审计写 BigQuery | 自动清理;审计长留 | 半天 |
 | 14 | ~~身份认证:审批 `actor` 从 token 取 + 要求 admin~~ | 审批链路不再可伪造 | ✅ 已完成(见 1.7) |
 | 15 | ~~chat 处理器用已验证身份覆盖 `ChatRequest.user_id`~~ | 1.6 的归属检查真正生效 | ✅ 已完成 |
-| 16 | `alerts.py` 的 `actor` 同样从 token 取 | 审计日志的操作人不再可伪造 | **1 小时** |
+| 16 | ~~`alerts.py` 的 `actor` 同样从 token 取~~ | 审计日志的操作人不再可伪造 | ✅ 已完成 |
 | 17 | WebSocket token 移出 query 参数 | 凭据不进访问日志 | 半天 |
 
 **第 3、4 步今天就能做完,而且零成本** —— 它们直接解决你感知到的 10 秒卡顿。
 **第 5 步优先级最高**:679 MB 的解析峰值配 1Gi 内存和 concurrency 4,现在是随时会 OOM 的状态。
-第 11 步是解锁一切的关键。身份认证部分(第 14、15 步)已经完成,
-**审批和对话两条链路的身份都不再可伪造**;剩下第 16、17 步是同一类收尾。
+第 11 步是解锁一切的关键。身份认证部分(第 14–16 步)已经全部完成,
+**审批、对话、告警确认三条链路的身份都不再可伪造**;只剩第 17 步 WebSocket 凭据。
 
 ---
 
