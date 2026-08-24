@@ -582,10 +582,20 @@ def _elastic_evidence_source(run_record: RunRecord) -> str:
 
 
 def _should_correct_llm_route(classified_intent: str, runtime_intent: str) -> bool:
-    return classified_intent == "ACTION_COMMAND" and runtime_intent not in {
-        "ACTION_COMMAND",
-        "EXPOSURE_ACTION",
-    }
+    if classified_intent == "ACTION_COMMAND":
+        return runtime_intent not in {
+            "ACTION_COMMAND",
+            "EXPOSURE_ACTION",
+        }
+    return classified_intent in {
+        "CHANGE_EXPLANATION",
+        "WEATHER_CHANGE",
+        "WIND_CHANGE",
+        "RISK_EXPLANATION",
+        "OPERATIONAL_PRIORITIZATION",
+        "EXPOSURE_LOOKUP",
+        "QUESTION",
+    } and runtime_intent == "KNOWLEDGE_REQUIRED"
 
 
 def _missing_tool_result(response: dict[str, Any]) -> bool:

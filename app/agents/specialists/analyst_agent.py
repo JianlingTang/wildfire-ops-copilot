@@ -12,6 +12,8 @@ def answer_operational_question(
 ) -> dict:
     lowered = message.lower()
     question_type = _question_type(lowered)
+    if question_type == "risk_methodology":
+        return _risk_methodology_payload(run)
     if not run:
         if region_name and aoi:
             return answer_focused_aoi_question(message, region_name, aoi, question_type)
@@ -85,6 +87,8 @@ def _format_center(aoi: Aoi) -> str:
 
 
 def _question_type(lowered: str) -> str:
+    if _is_risk_methodology_question(lowered):
+        return "risk_methodology"
     if "wind" in lowered and any(term in lowered for term in ["changed", "change", "since yesterday", "yesterday"]):
         return "wind_change"
     if "weather" in lowered and any(term in lowered for term in ["changed", "change", "since yesterday", "yesterday"]):
@@ -98,6 +102,45 @@ def _question_type(lowered: str) -> str:
     if "why" in lowered or "risk" in lowered or "evidence" in lowered:
         return "risk_explanation"
     return "operational_summary"
+
+
+def _is_risk_methodology_question(lowered: str) -> bool:
+    methodology_terms = ["calculate", "calculated", "calculation", "formula", "equation", "basis", "methodology"]
+    return "risk" in lowered and any(term in lowered for term in methodology_terms)
+
+
+def _risk_methodology_payload(run: RunRecord | None) -> dict[str, Any]:
+    answer = (
+        "Risk score is deterministic: score = min(100, 10 + wind_gust + low_humidity + low_rainfall "
+        "+ recent_hotspots + official_warning + spatial_exposure). Wind contributes up to 28 points "
+        "from gusts above 25 km/h; humidity up to 24 from values below 35%; low seven-day rainfall adds "
+        "16 points below 2 mm or 8 points below 8 mm; recent hotspots add up to 22; official warnings add "
+        "5/14/24 for Advice/Watch and Act/Emergency Warning; exposed critical assets add up to 10. "
+        "Levels are LOW under 35, MODERATE 35-64, HIGH 65-84, and EXTREME 85+."
+    )
+    facts: dict[str, Any] = {
+        "formula": "min(100, 10 + sum(driver contributions))",
+        "thresholds": {"LOW": "<35", "MODERATE": "35-64", "HIGH": "65-84", "EXTREME": "85+"},
+    }
+    if run:
+        facts["current"] = _run_facts(run)
+        drivers = run.risk_assessment.get("drivers", [])
+        if drivers:
+            driver_text = ", ".join(
+                f"{driver.get('factor')} {driver.get('contribution')}"
+                for driver in drivers
+                if isinstance(driver, dict)
+            )
+            answer += f" Current run drivers are: {driver_text}."
+    return {
+        "status": "success",
+        "question_type": "risk_methodology",
+        "facts": facts,
+        "missing": [],
+        "citations": [{"title": "Risk scoring implementation", "source": "app/services/risk_scoring.py"}],
+        "requires_synthesis": False,
+        "answer": answer,
+    }
 
 
 def _is_spatial_exposure_question(lowered: str) -> bool:

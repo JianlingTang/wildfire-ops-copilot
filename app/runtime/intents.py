@@ -5,6 +5,8 @@ def classify_intent(message: str) -> str:
         return "MEMORY_LOOKUP"
     if _is_calculation_request(lowered):
         return "CALCULATION"
+    if _is_risk_methodology_request(lowered):
+        return "RISK_EXPLANATION"
     if _is_knowledge_required(lowered):
         return "KNOWLEDGE_REQUIRED"
     if _is_visualization_request(lowered):
@@ -60,6 +62,12 @@ def _is_calculation_request(lowered: str) -> bool:
     return any(term in lowered for term in ["aoi", "wildfire", "fire"]) and any(
         term in lowered for term in ["area", "square kilometre", "square kilometer", "km2"]
     )
+
+
+def _is_risk_methodology_request(lowered: str) -> bool:
+    methodology_terms = ["calculate", "calculated", "calculation", "formula", "equation", "basis", "methodology"]
+    risk_terms = ["risk", "risk level", "risk score"]
+    return any(term in lowered for term in methodology_terms) and any(term in lowered for term in risk_terms)
 
 
 def _is_knowledge_required(lowered: str) -> bool:
