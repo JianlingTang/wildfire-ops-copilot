@@ -116,6 +116,43 @@ def test_adk_runtime_preserves_safe_knowledge_handoff_instead_of_final_text(monk
     assert result["response"]["answer"] != "LLM operator summary"
 
 
+def test_risk_methodology_answer_is_deterministic_without_completed_run() -> None:
+    result = answer_operational_question("How do you calculate risk level? On what basis and equations?", None)
+
+    assert result["status"] == "success"
+    assert result["question_type"] == "risk_methodology"
+    assert result["requires_synthesis"] is False
+    assert "score = min(100" in result["answer"]
+    assert "RAG pipeline" not in result["answer"]
+
+
+def test_adk_runtime_corrects_risk_methodology_away_from_rag(monkeypatch) -> None:
+    session_service = FakeSessionService()
+    runner = FakeRunner(
+        session_service,
+        last_intent="KNOWLEDGE_REQUIRED",
+        payload={
+            "status": "knowledge_required",
+            "mode": "adk",
+            "answer": "This wildfire question requires verified document retrieval.",
+            "requires_rag": True,
+        },
+    )
+    monkeypatch.setattr("app.runtime.adk._ensure_vertex_configuration", lambda: None)
+    monkeypatch.setattr("app.runtime.adk._get_session_service", lambda: session_service)
+    monkeypatch.setattr("app.runtime.adk._get_runner", lambda: runner)
+
+    result = AdkRuntime().route_chat(
+        ChatRequest(message="How do you calculate risk level? On what basis and equations?")
+    )
+
+    assert result["intent"] == "RISK_EXPLANATION"
+    assert result["response"]["question_type"] == "risk_methodology"
+    assert result["response"]["requires_synthesis"] is False
+    assert "score = min(100" in result["response"]["answer"]
+    assert "requires_rag" not in result["response"]
+
+
 def test_adk_runtime_builds_dashboard_payload_from_session_state_for_freeform_question(monkeypatch) -> None:
     session_service = FakeSessionService()
     runner = FakeRunner(session_service)

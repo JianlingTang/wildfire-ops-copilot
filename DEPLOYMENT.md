@@ -37,13 +37,14 @@ MCP search tool:
 - Tool: `search_wildfire_ops_knowledge`
 
 Store `elastic-kibana-url` and `elastic-api-key` in Secret Manager before deploy. If they already exist, add a new version.
+Set `FIREBASE_PROJECT_ID` and `AUTH_ALLOWED_EMAILS` in production to require Firebase ID tokens on `/api/*` routes and allow only named users. Put users allowed to approve/reject actions in `AUTH_ADMIN_EMAILS`. The static frontend should be built with the public Firebase web config values and must not embed backend API secrets.
 
 ## Smoke Test
 
 ```bash
 BACKEND_URL="$(gcloud run services describe wildfire-ops-backend --project <your-project-id> --region australia-southeast1 --format='value(status.url)')"
 curl "$BACKEND_URL/health"
-curl -X POST "$BACKEND_URL/api/chat" -H "Content-Type: application/json" -d '{"message":"Analyze this region and generate today's report.","region_id":"state_wa","region_name":"Western Australia hotspot cluster focus","aoi":{"center":[-16.12,126.35],"radius_km":50}}'
+curl -X POST "$BACKEND_URL/api/chat" -H "Content-Type: application/json" -H "Authorization: Bearer $FIREBASE_ID_TOKEN" -d '{"message":"Analyze this region and generate today's report.","region_id":"state_wa","region_name":"Western Australia hotspot cluster focus","aoi":{"center":[-16.12,126.35],"radius_km":50}}'
 ```
 
 ## Optional ADK Deploy

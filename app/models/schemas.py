@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 AlertStatus = Literal["active", "acknowledged", "resolved", "pending_review"]
 ActionStatus = Literal["drafted", "pending_approval", "approved", "rejected", "executed", "failed"]
@@ -9,9 +9,32 @@ RiskLevel = Literal["LOW", "MODERATE", "HIGH", "EXTREME"]
 
 
 class Aoi(BaseModel):
-    bbox: list[float] | None = Field(default=None, description="[west, south, east, north]")
+    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4, description="[west, south, east, north]")
     center: tuple[float, float] | None = Field(default=(-33.71, 150.31), description="lat/lon")
-    radius_km: float = 30
+    radius_km: float = Field(default=30, ge=1, le=200)
+
+    @field_validator("center")
+    @classmethod
+    def validate_center(cls, center: tuple[float, float] | None) -> tuple[float, float] | None:
+        if center is None:
+            return center
+        lat, lon = center
+        if not -90 <= lat <= 90 or not -180 <= lon <= 180:
+            raise ValueError("center must be a valid lat/lon pair")
+        return center
+
+    @model_validator(mode="after")
+    def validate_bbox(self) -> "Aoi":
+        if not self.bbox:
+            return self
+        west, south, east, north = self.bbox
+        if not -180 <= west <= 180 or not -180 <= east <= 180:
+            raise ValueError("bbox longitude values must be between -180 and 180")
+        if not -90 <= south <= 90 or not -90 <= north <= 90:
+            raise ValueError("bbox latitude values must be between -90 and 90")
+        if west >= east or south >= north:
+            raise ValueError("bbox must be ordered as west, south, east, north")
+        return self
 
 
 class ManualRunRequest(BaseModel):
@@ -25,21 +48,21 @@ class DailyRunRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str
-    conversation_id: str | None = None
-    run_id: str | None = None
-    region_id: str = "live_australia"
-    region_name: str | None = None
+    message: str = Field(min_length=1, max_length=4000)
+    conversation_id: str | None = Field(default=None, max_length=128)
+    run_id: str | None = Field(default=None, max_length=128)
+    region_id: str = Field(default="live_australia", max_length=128)
+    region_name: str | None = Field(default=None, max_length=256)
     aoi: Aoi | None = None
-    user_id: str = "demo_officer"
+    user_id: str = Field(default="demo_officer", max_length=128)
 
 
 class AcknowledgeAlertRequest(BaseModel):
-    actor: str = "demo_officer"
+    actor: str = Field(default="demo_officer", min_length=1, max_length=128)
 
 
 class ApprovalDecisionRequest(BaseModel):
-    actor: str = "demo_officer"
+    actor: str = Field(default="demo_officer", min_length=1, max_length=128)
 
 
 class RunRecord(BaseModel):

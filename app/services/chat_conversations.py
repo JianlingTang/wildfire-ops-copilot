@@ -4,7 +4,7 @@ from typing import Any
 
 from app.config.settings import settings
 from app.models.schemas import ChatRequest, ConversationRecord, RunRecord
-from app.runtime.intents import classify_intent
+from app.runtime.intents import _is_risk_methodology_request, classify_intent
 from app.services.agent_events import publish_trace_items
 from app.services.firestore_store import store
 
@@ -47,6 +47,8 @@ def completed_run_for_request(request: ChatRequest, conversation: ConversationRe
 
 def should_block_for_analysis(intent: str, request: ChatRequest, conversation: ConversationRecord) -> bool:
     if intent in {"ANALYZE_AND_REPORT", "CALCULATION", "KNOWLEDGE_REQUIRED", "MEMORY_LOOKUP", "QUESTION"}:
+        return False
+    if intent == "RISK_EXPLANATION" and _is_risk_methodology_request(request.message.lower()):
         return False
     return completed_run_for_request(request, conversation) is None
 

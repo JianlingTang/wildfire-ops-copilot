@@ -14,4 +14,7 @@ COPY wildfire_ops_agent ./wildfire_ops_agent
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
+RUN adduser --disabled-password --gecos "" appuser
+USER appuser
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

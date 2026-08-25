@@ -92,19 +92,23 @@ class InMemoryStore:
         region_name: str | None = None,
         run_id: str | None = None,
     ) -> ConversationRecord:
-        if conversation_id and conversation_id in self.conversations:
-            conversation = self.conversations[conversation_id]
+        existing = self.conversations.get(conversation_id) if conversation_id else None
+        # Resume only a conversation the caller owns. An unknown or unowned id starts a
+        # fresh conversation instead of raising, so callers cannot probe which ids exist.
+        if existing is not None and existing.user_id == user_id:
             updates: dict[str, Any] = {"updated_at": utc_now()}
             if run_id:
                 updates["run_id"] = run_id
             if region_name:
                 updates["region_name"] = region_name
-            conversation = conversation.model_copy(update=updates)
+            conversation = existing.model_copy(update=updates)
             self.conversations[conversation.conversation_id] = conversation
             return conversation
 
+        # Ids are always server-generated. Adopting a client-supplied id would let a caller
+        # squat an id that a later caller then joins, exposing the first caller's transcript.
         conversation = ConversationRecord(
-            conversation_id=conversation_id or f"conv_{uuid4().hex[:10]}",
+            conversation_id=f"conv_{uuid4().hex[:10]}",
             user_id=user_id,
             region_id=region_id,
             region_name=region_name,

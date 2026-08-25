@@ -15,7 +15,9 @@ DEFAULT_MONITOR_INTERVAL_MINUTES = 10
 _INTERVAL_PATTERN = re.compile(r"\b(\d{1,4})\s*-?\s*(minutes?|mins?|hours?|hrs?)\b", re.IGNORECASE)
 
 
-def create_monitor_task_from_chat(request: ChatRequest, interval_minutes: int | None = None) -> dict[str, Any]:
+def create_monitor_task_from_chat(
+    request: ChatRequest, interval_minutes: int | None = None, *, mode: str = "adk"
+) -> dict[str, Any]:
     resolved_interval_minutes = (
         interval_minutes or _parse_interval_minutes(request.message) or DEFAULT_MONITOR_INTERVAL_MINUTES
     )
@@ -37,7 +39,7 @@ def create_monitor_task_from_chat(request: ChatRequest, interval_minutes: int | 
     )
     return {
         "status": "success",
-        "mode": "adk",
+        "mode": mode,
         "monitor_task": task,
         "answer": (
             f"Created an active monitor task for {task.region_name}. "
@@ -45,13 +47,14 @@ def create_monitor_task_from_chat(request: ChatRequest, interval_minutes: int | 
             "and create an alert if the score jumps materially."
         ),
         "tool_trace": [
-            _trace_item("Main Coordinator", "Selected Monitor Task Workflow.", task.region_name),
+            _trace_item("Main Coordinator", "Selected Monitor Task Workflow.", task.region_name, mode),
             _trace_item(
                 "Monitoring Scheduler",
                 "Created recurring risk check.",
                 f"{task.interval_minutes} minute interval",
+                mode,
             ),
-            _trace_item("Alert Rule", "Configured material-change alerting.", "score delta >= 12"),
+            _trace_item("Alert Rule", "Configured material-change alerting.", "score delta >= 12", mode),
         ],
     }
 
@@ -126,5 +129,5 @@ def _run_monitor_check(task: MonitorTaskRecord) -> None:
         )
 
 
-def _trace_item(called: str, did: str, output: Any) -> dict[str, Any]:
-    return {"called": called, "did": did, "output": str(output), "mode": "adk", "status": "completed"}
+def _trace_item(called: str, did: str, output: Any, mode: str) -> dict[str, Any]:
+    return {"called": called, "did": did, "output": str(output), "mode": mode, "status": "completed"}

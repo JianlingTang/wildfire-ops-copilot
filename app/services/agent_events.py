@@ -22,8 +22,8 @@ class AgentEventHub:
     def __init__(self) -> None:
         self._clients: set[WebSocket] = set()
 
-    async def connect(self, websocket: WebSocket) -> None:
-        await websocket.accept()
+    def register(self, websocket: WebSocket) -> None:
+        # The socket is accepted during authentication, before it reaches the hub.
         self._clients.add(websocket)
 
     def disconnect(self, websocket: WebSocket) -> None:

@@ -41,20 +41,6 @@ def coerce_radius_km(aoi: Aoi | dict) -> float:
     return float(radius if radius is not None else 30)
 
 
-def coerce_bbox(aoi: Aoi | dict) -> tuple[float, float, float, float]:
-    bbox = aoi.get("bbox") if isinstance(aoi, dict) else aoi.bbox
-    if bbox and len(bbox) == 4:
-        west, south, east, north = (float(value) for value in bbox)
-        return west, south, east, north
-
-    lat, lon = coerce_center(aoi)
-    radius_km = coerce_radius_km(aoi)
-    lat_delta = radius_km / 110.574
-    lon_scale = max(0.1, 111.320 * cos(radians(lat)))
-    lon_delta = radius_km / lon_scale
-    return lon - lon_delta, lat - lat_delta, lon + lon_delta, lat + lat_delta
-
-
 def haversine_km(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
     earth_radius_km = 6371.0
     lat1 = radians(lat_a)

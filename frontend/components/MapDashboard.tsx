@@ -135,20 +135,29 @@ function buildMapState(
     | undefined
 ) {
   if (run) {
-    const hotspots = run.evidence?.hotspots?.data?.hotspots?.filter(isValidHotspot) ?? [];
+    const runHotspotEvidence = run.evidence?.hotspots;
+    const runHotspots = run.evidence?.hotspots?.data?.hotspots?.filter(isValidHotspot) ?? [];
+    const shouldUseFocusFallback =
+      runHotspots.length === 0 &&
+      Boolean(selectedFocus?.hotspots.length) &&
+      (runHotspotEvidence?.status === "error" || !runHotspotEvidence?.data);
+    const hotspots = shouldUseFocusFallback ? selectedFocus?.hotspots ?? [] : runHotspots;
+    const hotspotCount = shouldUseFocusFallback
+      ? selectedFocus?.hotspotCount ?? hotspots.length
+      : run.evidence?.hotspots?.data?.count_24h ?? hotspots.length;
     const warnings = run.evidence?.official_warnings?.data?.incidents?.filter(isMappableWarning) ?? [];
     const regionContext = run.evidence?.region_context;
     const radiusKm = regionContext?.radius_km ?? 30;
     const center = coerceCenter(regionContext?.center);
     return {
       center,
-      hotspotCount: run.evidence?.hotspots?.data?.count_24h ?? hotspots.length,
+      hotspotCount,
       hotspots,
       radiusKm,
       regionName: run.region_name,
       riskLevel: run.risk_level,
-      sourceLine: `${run.evidence?.hotspots?.source ?? "Hotspot feed"} · ${run.evidence?.official_warnings?.source ?? "Official warning feed"}`,
-      summaryLine: `${run.evidence?.hotspots?.data?.count_24h ?? hotspots.length} hotspots · ${run.evidence?.official_warnings?.data?.incident_count ?? warnings.length} warnings · ${radiusKm} km radius`,
+      sourceLine: `${shouldUseFocusFallback ? selectedFocus?.source : run.evidence?.hotspots?.source ?? "Hotspot feed"} · ${run.evidence?.official_warnings?.source ?? "Official warning feed"}`,
+      summaryLine: `${hotspotCount} hotspots · ${run.evidence?.official_warnings?.data?.incident_count ?? warnings.length} warnings · ${radiusKm} km radius`,
       warningCount: run.evidence?.official_warnings?.data?.incident_count ?? warnings.length,
       warnings,
       zoneLabel: `${run.risk_level ?? "Standby"} zone`,

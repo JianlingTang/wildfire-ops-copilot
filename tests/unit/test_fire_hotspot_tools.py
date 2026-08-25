@@ -1,10 +1,30 @@
 from app.models.schemas import Aoi
 from app.tools.fire_hotspot_tools import (
+    _AUSTRALIA_OVERVIEW_CACHE,
+    _AUSTRALIA_OVERVIEW_CACHE_LOCK,
     get_australia_hotspots_overview,
     get_fire_hotspots,
     get_state_hotspot_focus,
+    refresh_dea_hotspot_cache,
     resolve_operational_region,
 )
+
+
+def _reset_dea_cache() -> None:
+    with _AUSTRALIA_OVERVIEW_CACHE_LOCK:
+        _AUSTRALIA_OVERVIEW_CACHE.update(
+            {
+                "etag": None,
+                "last_modified": None,
+                "last_checked_at": None,
+                "last_refreshed_at": None,
+                "next_refresh_at": None,
+                "payload": None,
+                "refresh_error": None,
+                "refreshing": False,
+                "rows": None,
+            }
+        )
 
 
 def test_validates_input_aoi() -> None:
@@ -23,7 +43,12 @@ def test_returns_structured_status() -> None:
 
 
 def test_parses_live_hotspot_response_from_dea(monkeypatch) -> None:
+    _reset_dea_cache()
+
     class DummyResponse:
+        status_code = 200
+        headers = {"etag": '"test-etag"', "last-modified": "Sat, 22 Aug 2026 06:52:14 GMT"}
+
         def raise_for_status(self) -> None:
             return None
 
@@ -60,8 +85,9 @@ def test_parses_live_hotspot_response_from_dea(monkeypatch) -> None:
     monkeypatch.setenv("WILDFIRE_DATA_MODE", "auto")
     monkeypatch.delenv("NASA_FIRMS_API_KEY", raising=False)
     monkeypatch.delenv("NASA_FIRMS_MAP_KEY", raising=False)
-    monkeypatch.setattr("app.tools.fire_hotspot_tools.httpx.get", lambda *args, **kwargs: DummyResponse())
+    monkeypatch.setattr("app.tools.fire_hotspot_tools.cache.httpx.get", lambda *args, **kwargs: DummyResponse())
 
+    refresh_dea_hotspot_cache(force=True)
     result = get_fire_hotspots(Aoi())
 
     assert result["status"] == "success"
@@ -69,6 +95,44 @@ def test_parses_live_hotspot_response_from_dea(monkeypatch) -> None:
     assert result["source"] == "DEA Hotspots recent feed"
     assert result["data"]["count_7d"] == 2
     assert len(result["data"]["hotspots"]) == 2
+
+
+def test_live_hotspot_request_does_not_fetch_dea_when_cache_is_ready(monkeypatch) -> None:
+    _reset_dea_cache()
+    calls = {"count": 0}
+
+    class DummyResponse:
+        status_code = 200
+        headers = {"etag": '"test-etag"'}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "features": [
+                    {
+                        "geometry": {"type": "Point", "coordinates": [150.31, -33.71]},
+                        "properties": {"datetime": "2026-05-28T00:30:00Z", "confidence": 90},
+                    }
+                ]
+            }
+
+    def fake_get(*args, **kwargs):
+        calls["count"] += 1
+        return DummyResponse()
+
+    monkeypatch.setenv("WILDFIRE_DATA_MODE", "auto")
+    monkeypatch.delenv("NASA_FIRMS_API_KEY", raising=False)
+    monkeypatch.delenv("NASA_FIRMS_MAP_KEY", raising=False)
+    monkeypatch.setattr("app.tools.fire_hotspot_tools.cache.httpx.get", fake_get)
+
+    refresh_dea_hotspot_cache(force=True)
+    assert calls["count"] == 1
+
+    result = get_australia_hotspots_overview()
+    assert result["status"] == "success"
+    assert calls["count"] == 1
 
 
 def test_handles_api_failure() -> None:

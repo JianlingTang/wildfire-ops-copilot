@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.models.schemas import ApprovalDecisionRequest
 from app.services.agent_events import new_trace_id, publish_agent_event
+from app.services.api_auth import is_api_auth_enabled, require_admin_user
 from app.services.approval_policy import can_decide_action
 from app.services.firestore_store import store
 
@@ -14,13 +15,14 @@ def list_actions() -> dict:
 
 
 @router.post("/actions/{action_id}/approve")
-def approve_action(action_id: str, request: ApprovalDecisionRequest) -> dict:
+def approve_action(action_id: str, request: Request, payload: ApprovalDecisionRequest) -> dict:
     action = store.actions.get(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
-    if not can_decide_action(request.actor, action):
+    actor = _decision_actor(request, payload)
+    if not can_decide_action(actor, action):
         raise HTTPException(status_code=403, detail="Action cannot be approved by this actor or state")
-    action, approval = store.approve_action(action_id, request.actor)
+    action, approval = store.approve_action(action_id, actor)
     publish_agent_event(
         trace_id=new_trace_id(),
         conversation_id=None,
@@ -40,13 +42,14 @@ def approve_action(action_id: str, request: ApprovalDecisionRequest) -> dict:
 
 
 @router.post("/actions/{action_id}/reject")
-def reject_action(action_id: str, request: ApprovalDecisionRequest) -> dict:
+def reject_action(action_id: str, request: Request, payload: ApprovalDecisionRequest) -> dict:
     action = store.actions.get(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
-    if not can_decide_action(request.actor, action):
+    actor = _decision_actor(request, payload)
+    if not can_decide_action(actor, action):
         raise HTTPException(status_code=403, detail="Action cannot be rejected by this actor or state")
-    action, approval = store.reject_action(action_id, request.actor)
+    action, approval = store.reject_action(action_id, actor)
     publish_agent_event(
         trace_id=new_trace_id(),
         conversation_id=None,
@@ -62,3 +65,10 @@ def reject_action(action_id: str, request: ApprovalDecisionRequest) -> dict:
         },
     )
     return {"action": action, "approval": approval}
+
+
+def _decision_actor(request: Request, payload: ApprovalDecisionRequest) -> str:
+    if not is_api_auth_enabled():
+        return payload.actor
+    user = require_admin_user(request)
+    return user.email
