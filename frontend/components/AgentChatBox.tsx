@@ -10,13 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
 const prompts = [
   "Analyze the most active hotspot region in Australia and generate today's report.",
-  "Create a hotspot heatmap and contour visualization for this AOI.",
   "Create a monitor task for this state every 10 minutes.",
-  "Why is the current risk high?",
+  "Why is the current risk moderate?",
   "Show the risk trend for this AOI.",
-  "What if wind increases by 20%?",
-  "Which area should we inspect first?",
-  "Draft a public advisory for this alert."
+  "What changes if wind speed increases by 20%?",
+  "Which area should we inspect first? Show the five most exposed roads and assets nearby.",
+  "Draft a public alert for Facebook, email, and an official advisory."
 ];
 
 type ChatIntent = "analysis" | "action" | "question" | "visualization" | "monitor";
@@ -223,8 +222,7 @@ function completedTraceForResult(result: ChatApiResult, intent: ChatIntent): Inl
   ];
 }
 
-function traceFromBackend(result: ChatApiResult): InlineTraceItem[] {
-  const trace = result.response?.tool_trace;
+function traceFromToolTrace(trace: unknown): InlineTraceItem[] {
   if (!Array.isArray(trace)) {
     return [];
   }
@@ -239,6 +237,10 @@ function traceFromBackend(result: ChatApiResult): InlineTraceItem[] {
         status: status === "running" || status === "failed" || status === "pending" ? status : "completed"
       };
     });
+}
+
+function traceFromBackend(result: ChatApiResult): InlineTraceItem[] {
+  return traceFromToolTrace(result.response?.tool_trace);
 }
 
 export function AgentChatBox({
@@ -418,7 +420,7 @@ export function AgentChatBox({
             aria-label="Agent command input"
             className="min-h-[112px] w-full resize-none rounded-lg border border-slate-200 bg-background px-3 py-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
             onChange={(event) => setMessage(event.target.value)}
-            placeholder="Why is the current risk high? What if wind increases by 20%? Which area should we inspect first? Draft a public advisory for this alert."
+            placeholder="Why is the current risk moderate? What changes if wind speed increases by 20%? Which area should we inspect first?"
             value={message}
           />
           <div className="flex items-center justify-between gap-3">
@@ -775,21 +777,7 @@ function coerceRiskTrend(value: unknown): ApiRiskTrend | null {
 }
 
 function traceFromChatMessage(message: ApiChatMessage): InlineTraceItem[] {
-  const trace = message.tool_trace;
-  if (!Array.isArray(trace)) {
-    return [];
-  }
-  return trace
-    .filter((item) => item && typeof item === "object")
-    .map((item): InlineTraceItem => {
-      const status = String(item.status ?? "completed");
-      return {
-        agent: String(item.called ?? "Agent"),
-        action: String(item.did ?? "Completed workflow step."),
-        output: String(item.output ?? item.next_step ?? "Completed."),
-        status: status === "running" || status === "failed" || status === "pending" ? status : "completed"
-      };
-    });
+  return traceFromToolTrace(message.tool_trace);
 }
 
 function downloadVisualization(visualization: ApiHotspotVisualization) {

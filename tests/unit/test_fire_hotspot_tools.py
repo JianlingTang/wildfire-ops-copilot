@@ -85,7 +85,7 @@ def test_parses_live_hotspot_response_from_dea(monkeypatch) -> None:
     monkeypatch.setenv("WILDFIRE_DATA_MODE", "auto")
     monkeypatch.delenv("NASA_FIRMS_API_KEY", raising=False)
     monkeypatch.delenv("NASA_FIRMS_MAP_KEY", raising=False)
-    monkeypatch.setattr("app.tools.fire_hotspot_tools.httpx.get", lambda *args, **kwargs: DummyResponse())
+    monkeypatch.setattr("app.tools.fire_hotspot_tools.cache.httpx.get", lambda *args, **kwargs: DummyResponse())
 
     refresh_dea_hotspot_cache(force=True)
     result = get_fire_hotspots(Aoi())
@@ -125,7 +125,7 @@ def test_live_hotspot_request_does_not_fetch_dea_when_cache_is_ready(monkeypatch
     monkeypatch.setenv("WILDFIRE_DATA_MODE", "auto")
     monkeypatch.delenv("NASA_FIRMS_API_KEY", raising=False)
     monkeypatch.delenv("NASA_FIRMS_MAP_KEY", raising=False)
-    monkeypatch.setattr("app.tools.fire_hotspot_tools.httpx.get", fake_get)
+    monkeypatch.setattr("app.tools.fire_hotspot_tools.cache.httpx.get", fake_get)
 
     refresh_dea_hotspot_cache(force=True)
     assert calls["count"] == 1
