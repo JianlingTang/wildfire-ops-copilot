@@ -45,10 +45,19 @@ def _get_runner() -> Runner:
     return _RUNNER
 
 
-async def _ensure_session(session_service: InMemorySessionService, user_id: str, session_id: str) -> None:
+async def _ensure_session(
+    session_service: InMemorySessionService,
+    user_id: str,
+    session_id: str,
+    state: dict[str, Any] | None = None,
+) -> None:
     existing = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
     if existing is None:
-        await session_service.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id, state={})
+        # Seed state at creation: ADK does not persist in-place mutation of a
+        # session returned by get_session(), so tools would read app:* as None.
+        await session_service.create_session(
+            app_name=APP_NAME, user_id=user_id, session_id=session_id, state=dict(state or {})
+        )
 
 
 async def _merge_request_state(
@@ -64,12 +73,12 @@ async def _merge_request_state(
 
 def _state_delta_for_request(request: ChatRequest) -> dict[str, Any]:
     delta: dict[str, Any] = {
-        "app:conversation_id": request.conversation_id,
-        "app:run_id": request.run_id,
-        "app:region_id": request.region_id,
-        "app:region_name": request.region_name,
-        "app:user_id": request.user_id,
-        "app:last_request_message": request.message,
+        "conversation_id": request.conversation_id,
+        "run_id": request.run_id,
+        "region_id": request.region_id,
+        "region_name": request.region_name,
+        "user_id": request.user_id,
+        "last_request_message": request.message,
         "last_intent": None,
         "last_response_payload": None,
         "last_run_id": None,
@@ -78,11 +87,11 @@ def _state_delta_for_request(request: ChatRequest) -> dict[str, Any]:
         "last_action_id": None,
     }
     if request.aoi and request.aoi.center:
-        delta["app:aoi_center"] = list(request.aoi.center)
-        delta["app:aoi_radius_km"] = request.aoi.radius_km
+        delta["aoi_center"] = list(request.aoi.center)
+        delta["aoi_radius_km"] = request.aoi.radius_km
     else:
-        delta["app:aoi_center"] = None
-        delta["app:aoi_radius_km"] = None
+        delta["aoi_center"] = None
+        delta["aoi_radius_km"] = None
     return delta
 
 

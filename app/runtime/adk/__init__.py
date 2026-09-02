@@ -44,6 +44,7 @@ from app.runtime.adk.session import (
     _get_session_service,
     _merge_request_state,
     _session_id_for,
+    _state_delta_for_request,
 )
 from app.runtime.base import AgentRuntime
 from app.runtime.intent_responses import publish_chat_event
@@ -104,6 +105,6 @@ async def _prepare_adk_session(request: ChatRequest) -> tuple[InMemorySessionSer
     runner = _get_runner()
     user_id = request.user_id or "demo_officer"
     session_id = _session_id_for(request)
-    await _ensure_session(session_service, user_id, session_id)
+    await _ensure_session(session_service, user_id, session_id, _state_delta_for_request(request))
     await _merge_request_state(session_service, user_id, session_id, request)
     return session_service, runner, user_id, session_id

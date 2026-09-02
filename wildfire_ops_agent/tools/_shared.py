@@ -23,27 +23,27 @@ def _chat_request_from_context(
     run_id: str | None = None,
     user_id: str | None = None,
 ) -> ChatRequest:
-    center = aoi_center or tool_context.state.get("app:aoi_center")
-    effective_radius_km = radius_km or tool_context.state.get("app:aoi_radius_km")
+    center = aoi_center or tool_context.state.get("aoi_center")
+    effective_radius_km = radius_km or tool_context.state.get("aoi_radius_km")
     aoi = None
     if isinstance(center, (list, tuple)) and len(center) == 2 and effective_radius_km:
         aoi = Aoi(center=(float(center[0]), float(center[1])), radius_km=float(effective_radius_km))
     return ChatRequest(
         message=message,
-        conversation_id=_normalize_optional_str(tool_context.state.get("app:conversation_id")),
-        run_id=_normalize_optional_str(run_id or tool_context.state.get("app:run_id")),
-        region_id=str(region_id or tool_context.state.get("app:region_id", "live_australia")),
-        region_name=_normalize_optional_str(region_name or tool_context.state.get("app:region_name")),
+        conversation_id=_normalize_optional_str(tool_context.state.get("conversation_id")),
+        run_id=_normalize_optional_str(run_id or tool_context.state.get("run_id")),
+        region_id=str(region_id or tool_context.state.get("region_id", "live_australia")),
+        region_name=_normalize_optional_str(region_name or tool_context.state.get("region_name")),
         aoi=aoi,
-        user_id=str(user_id or tool_context.state.get("app:user_id", "demo_officer")),
+        user_id=str(user_id or tool_context.state.get("user_id", "demo_officer")),
     )
 
 
 def _resolve_run(tool_context: ToolContext) -> RunRecord | None:
-    run_id = _normalize_optional_str(tool_context.state.get("app:run_id"))
+    run_id = _normalize_optional_str(tool_context.state.get("run_id"))
     if run_id and run_id in store.runs:
         return store.runs[run_id]
-    region_id = _normalize_optional_str(tool_context.state.get("app:region_id"))
+    region_id = _normalize_optional_str(tool_context.state.get("region_id"))
     return store.get_latest_run(region_id)
 
 
@@ -61,7 +61,7 @@ def _stash_result(
     tool_context.state["last_response_payload"] = payload
     if run_id:
         tool_context.state["last_run_id"] = run_id
-        tool_context.state["app:run_id"] = run_id
+        tool_context.state["run_id"] = run_id
     if report_id:
         tool_context.state["last_report_id"] = report_id
     if alert_id:

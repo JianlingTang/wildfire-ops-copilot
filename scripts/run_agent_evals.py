@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.models.schemas import Aoi, ChatRequest
 from app.runtime.mock_demo import MockDemoRuntime
 from app.services.firestore_store import store
+from app.services.tool_registry import labels_for
 
 DEFAULT_GOLDEN_PATH = Path("evals/wildfire_ops_golden.json")
 DEFAULT_OUTPUT_PATH = Path("artifacts/evals/wildfire_ops_eval_results.json")
@@ -37,8 +38,25 @@ def load_golden_cases(path: Path = DEFAULT_GOLDEN_PATH) -> list[dict[str, Any]]:
     return cases
 
 
-def run_eval(cases: list[dict[str, Any]], *, output_path: Path | None = DEFAULT_OUTPUT_PATH) -> dict[str, Any]:
-    runtime = MockDemoRuntime()
+def _build_runtime(name: str):
+    """mock_demo runs offline with zero LLM calls; adk exercises the live Gemini agent."""
+    if name == "adk":
+        from app.runtime.adk import AdkRuntime
+
+        return AdkRuntime()
+    return MockDemoRuntime()
+
+
+def run_eval(
+    cases: list[dict[str, Any]],
+    *,
+    output_path: Path | None = DEFAULT_OUTPUT_PATH,
+    runtime_name: str = "mock_demo",
+    limit: int | None = None,
+) -> dict[str, Any]:
+    runtime = _build_runtime(runtime_name)
+    if limit is not None:
+        cases = cases[:limit]
     results: list[dict[str, Any]] = []
     total_latency_ms: list[float] = []
 
@@ -50,10 +68,10 @@ def run_eval(cases: list[dict[str, Any]], *, output_path: Path | None = DEFAULT_
         total_latency_ms.append(latency_ms)
         results.append(_score_case(case, response, prepared, latency_ms))
 
-    summary = _summarize(results, total_latency_ms)
+    summary = _summarize(results, total_latency_ms, runtime_name)
     payload = {
         "schema_version": 1,
-        "runtime": "mock_demo",
+        "runtime": runtime_name,
         "generated_at": datetime.now(UTC).isoformat(),
         "summary": summary,
         "cases": results,
@@ -231,7 +249,11 @@ def _score_case(
     argument_results = [_check_argument(assertion, response, prepared) for assertion in expected.get("arguments", [])]
     artifact_results = _check_artifacts(expected.get("artifact_states") or {}, prepared)
     memory_result = _check_memory(expected.get("memory_exact"), response)
-    tool_ok = str(expected.get("tool", "")) in trace_text
+    # Assert the stable tool id, not the display label: labels get renamed by
+    # refactors and used to produce false failures with no behaviour change.
+    expected_tool_id = str(expected.get("tool_id", ""))
+    accepted_labels = labels_for(expected_tool_id)
+    tool_ok = any(label in trace_text for label in accepted_labels)
     route_ok = actual_route == expected_route
     in_scope = expected.get("in_scope") is True
     scope_false_pass = not in_scope and actual_route != "OUT_OF_SCOPE"
@@ -239,7 +261,16 @@ def _score_case(
     multi_step_result = _check_multi_step(expected.get("multi_step_tools") or [], trace_text, artifact_results)
     unsafe_executed = any(action.status == "executed" for action in store.actions.values())
     hallucinated_state = _detect_hallucinated_state(response, prepared)
-    checks = [
+    # Contract checks assert the response SHAPE the API promises: field paths and
+    # trace labels. They break on refactors without the agent behaving any
+    # differently, so they must not be scored as agent capability.
+    contract_checks: list[bool] = []
+    contract_checks.extend(item["ok"] for item in argument_results)
+    if memory_result is not None:
+        contract_checks.append(memory_result["ok"])
+
+    # Capability checks assert the agent DID THE RIGHT THING.
+    capability_checks = [
         route_ok,
         tool_ok,
         not scope_false_pass,
@@ -247,12 +278,13 @@ def _score_case(
         not unsafe_executed,
         not hallucinated_state,
     ]
-    checks.extend(item["ok"] for item in argument_results)
-    checks.extend(item["ok"] for item in artifact_results)
-    if memory_result is not None:
-        checks.append(memory_result["ok"])
+    capability_checks.extend(item["ok"] for item in artifact_results)
     if multi_step_result is not None:
-        checks.append(multi_step_result["ok"])
+        capability_checks.append(multi_step_result["ok"])
+
+    contract_ok = all(contract_checks)
+    capability_ok = all(capability_checks)
+    checks = contract_checks + capability_checks
 
     return {
         "id": case["id"],
@@ -260,7 +292,7 @@ def _score_case(
         "actual_route": actual_route,
         "expected_route": expected_route,
         "route_ok": route_ok,
-        "expected_tool": expected.get("tool"),
+        "expected_tool_id": expected_tool_id,
         "tool_ok": tool_ok,
         "scope_false_pass": scope_false_pass,
         "scope_false_reject": scope_false_reject,
@@ -271,24 +303,41 @@ def _score_case(
         "unsafe_executed": unsafe_executed,
         "hallucinated_state": hallucinated_state,
         "latency_ms": latency_ms,
+        "contract_ok": contract_ok,
+        "capability_ok": capability_ok,
         "success": all(checks),
         "answer": _get_path(response, "response.answer"),
         "trace_text": trace_text,
     }
 
 
-def _summarize(results: list[dict[str, Any]], latencies: list[float]) -> dict[str, Any]:
+def _summarize(
+    results: list[dict[str, Any]],
+    latencies: list[float],
+    runtime_name: str = "mock_demo",
+) -> dict[str, Any]:
     out_of_scope = [item for item in results if item["expected_route"] == "OUT_OF_SCOPE"]
     in_scope = [item for item in results if item["expected_route"] != "OUT_OF_SCOPE"]
     argument_checks = [check for item in results for check in item["argument_results"]]
     memory_checks = [item["memory_result"] for item in results if item["memory_result"] is not None]
     multi_step_checks = [item["multi_step_result"] for item in results if item["multi_step_result"] is not None]
     successful = [item for item in results if item["success"]]
+    contract_intact = [item for item in results if item["contract_ok"]]
     offline_cost_usd = 0.0
     return {
         "total_cases": len(results),
         "successful_cases": len(successful),
         "success_rate": _rate(len(successful), len(results)),
+        # Headline agent number. Contract-broken cases are excluded because a
+        # missing field path means the answer is unreadable, not wrong.
+        "capability_pass_rate": _rate(
+            sum(item["capability_ok"] for item in contract_intact), len(contract_intact)
+        ),
+        "capability_pass_rate_all_cases": _rate(
+            sum(item["capability_ok"] for item in results), len(results)
+        ),
+        "contract_pass_rate": _rate(sum(item["contract_ok"] for item in results), len(results)),
+        "contract_broken_case_ids": [item["id"] for item in results if not item["contract_ok"]],
         "scope_false_pass_rate": _rate(sum(item["scope_false_pass"] for item in out_of_scope), len(out_of_scope)),
         "scope_false_reject_rate": _rate(sum(item["scope_false_reject"] for item in in_scope), len(in_scope)),
         "route_accuracy": _rate(sum(item["route_ok"] for item in results), len(results)),
@@ -311,7 +360,10 @@ def _summarize(results: list[dict[str, Any]], latencies: list[float]) -> dict[st
         "offline_cost_per_successful_request_usd": offline_cost_usd / len(successful) if successful else None,
         "production_model_cost_per_successful_request_usd": None,
         "production_cost_note": (
-            "Not measured in offline mock_demo eval because no ADK/Gemini token usage is available."
+            "Live ADK/Gemini run: latency is end-to-end wall clock. Token usage is not exposed by the "
+            "runtime, so per-request model cost is still not derived here."
+            if runtime_name == "adk"
+            else "Not measured in offline mock_demo eval because no ADK/Gemini token usage is available."
         ),
         "failed_case_ids": [item["id"] for item in results if not item["success"]],
     }
@@ -503,8 +555,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run offline Wildfire Ops golden evals.")
     parser.add_argument("--golden", type=Path, default=DEFAULT_GOLDEN_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument("--runtime", choices=["mock_demo", "adk"], default="mock_demo")
+    parser.add_argument("--limit", type=int, default=None, help="Run only the first N cases (smoke test).")
     args = parser.parse_args()
-    payload = run_eval(load_golden_cases(args.golden), output_path=args.output)
+    payload = run_eval(
+        load_golden_cases(args.golden),
+        output_path=args.output,
+        runtime_name=args.runtime,
+        limit=args.limit,
+    )
     print(json.dumps(payload["summary"], indent=2, default=_json_default))
 
 
