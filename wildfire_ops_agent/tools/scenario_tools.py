@@ -66,7 +66,7 @@ def action_command_tool(
         run_id=run_id,
         user_id=user_id,
     )
-    requested_by = request.user_id or str(tool_context.state.get("app:user_id", "demo_officer"))
+    requested_by = request.user_id or str(tool_context.state.get("user_id", "demo_officer"))
     payload = draft_action(user_request, run, requested_by, request.region_name, custom_draft=custom_draft)
     payload["mode"] = "adk"
     action = payload.get("action") or {}

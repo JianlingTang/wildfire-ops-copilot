@@ -721,6 +721,252 @@ Cloud Run 按实例数计费,作品集项目设 `--max-instances 2` 就够了。
 
 ---
 
+# 第八部分:ADK 会话状态踩坑与记忆最佳实践
+
+本部分是 2026-09-01 接真实 Gemini 跑离线评测时挖出来的。两个 bug 都属于
+**代码看起来完全正确、但静默失效**的类型,单靠读代码发现不了。
+
+## 8.1 踩坑一:`get_session()` 返回的是深拷贝,就地修改无效
+
+**症状**:8 条 memory 用例在 mock runtime 下 100% 通过,接真实 ADK 后
+`memory_exact_match_accuracy` 直接掉到 **0**。路由对、工具对,查询也执行了,
+但一律返回 `not_found`。
+
+**当时的代码**(`app/runtime/adk/session.py`):
+
+```python
+session = await session_service.get_session(...)
+session.state.update(_state_delta_for_request(request))   # 静默失效
+```
+
+**根因**。ADK 源码 `google/adk/sessions/in_memory_session_service.py:202`:
+
+```python
+copied_session = _copy_session(session)
+...
+# Return a copy of the session object with merged state.
+return self._merge_state(app_name, user_id, copied_session)
+```
+
+`get_session()` 返回**深拷贝**。改拷贝不影响存储。没有异常、没有警告、`update()`
+正常返回 —— 写进去的东西直接蒸发。
+
+**断链完整路径**:
+
+```
+LLM 调 conversation_memory_lookup_tool
+  → 工具只能看 session state,读 conversation_id
+  → 拿到 None                                    ← 断点
+  → 构造 conversation_id=None 的 ChatRequest
+  → store.conversations.get("") 查不到
+  → not_found
+```
+
+对话内容一直好好躺在 `InMemoryStore` 里。丢的是**指向它的那个键**。
+
+**ADK 只认两条写入路径**:
+
+| 路径 | 用法 |
+|---|---|
+| 创建时传入 | `create_session(..., state={...})` |
+| 事件提交 | `append_event(session, event)`,状态放 `event.actions.state_delta` |
+
+这样设计是为了让状态变更可排序、可重放,换 `DatabaseSessionService` /
+`VertexAiSessionService` 后端时同一份代码仍然成立。就地改内存对象换个后端立刻失效。
+
+**已修**:`_ensure_session()` 增加可选 `state` 参数,创建会话时就把
+`_state_delta_for_request(request)` 播种进去。
+
+## 8.2 踩坑二:`app:` 前缀是**全应用共享**,不是会话级
+
+ADK 的 state 键前缀有语义,源码 `in_memory_session_service.py:126` 把 `app:` 开头的键
+写进 `self.app_state[app_name]`,再由 `_merge_state` 合并进**每一个**会话:
+
+| 前缀 | 作用域 |
+|---|---|
+| `app:` | 该应用**所有用户、所有会话**共享 |
+| `user:` | 该用户跨会话 |
+| 无前缀 | 仅当前会话 |
+| `temp:` | 不持久化 |
+
+我们把 `conversation_id` / `run_id` / `user_id` / `region_*` / `aoi_*` 全写成了
+`app:` 前缀。单用户 demo 看不出问题,**多用户并发时用户 A 的工具会读到用户 B 的坐标**。
+这与 1.6 修的会话 ID 归属校验是两个独立问题:1.6 管的是"能不能恢复别人的会话",
+这里管的是"当轮工具读到谁的坐标"。
+
+**已修**:全部去掉 `app:` 前缀改为会话级。涉及 3 个文件、8 个键:
+`session.py`、`tools/_shared.py`、`tools/scenario_tools.py`。
+
+## 8.3 为什么离线评测没测出来
+
+mock runtime 直接把 `ChatRequest` 对象传给 handler,**完全不经过 ADK session state**。
+写入、序列化、工具读取这整条链路在离线评测里一行都没执行过。
+
+50 条用例全绿,测的却是另一条代码路径。
+
+**教训:评测必须走生产路径,否则测得越绿越危险。** 这也是本项目评测框架加
+`--runtime {mock_demo,adk}` 开关的原因。
+
+## 8.4 Agent 记忆最佳实践
+
+**四层要分清**:
+
+| 层 | 内容 | 存哪 | 生命周期 |
+|---|---|---|---|
+| 工作状态 | 当前轮的坐标、指针 | session state | 单次会话 |
+| 对话历史 | 消息 transcript | 真正的存储,append-only | 长期 |
+| 长期记忆 | 跨会话的用户偏好 | 独立存储 + 显式写入策略 | 永久 |
+| 检索知识 | 文档、政策 | 向量库 / 搜索 | 与会话无关 |
+
+**六条原则**:
+
+1. **身份与内容分离。** session state 只放 ID 指针,内容放真正的存储。
+   本项目架构本来就是对的 —— 很多实现反过来把整段历史塞进 session state,几轮就爆 context。
+2. **精确回忆必须走确定性查询,绝不问模型。** 「我上一个问题是什么」要么从存储精确取出,
+   要么明说没有。本项目做对了这点,所以失败时返回 `not_found` 而不是编一个问题 ——
+   这也是 `hallucinated_state_rate` 全程为 0 的原因。
+3. **单一真相源。** transcript 只有一个 owner。
+4. **显式写入路径 + 写后读回验证。** 一行断言就能在第一次运行时炸出 8.1 那个 bug。
+5. **边界处校验上下文。** 工具拿到 `conversation_id=None` 应当抛错,而不是安静返回
+   `not_found` —— 它把配置 bug 伪装成了"没有记录"。
+6. **键要分作用域。** 见 8.2。
+
+**不要修改框架 getter 返回的对象。** 默认假设拷贝语义,除非文档明确说是引用。
+
+## 8.5 修复前后实测
+
+同一套 50 条 golden case,真实 Gemini(`--runtime adk`):
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| `success_rate` | 0.60 | **0.74 – 0.76** |
+| `memory_exact_match_accuracy` | **0.00** | **1.00** |
+| `tool_argument_accuracy` | 0.64 | 0.86 |
+| `route_accuracy` | 0.94 | 0.94 – 0.98 |
+| `p95_latency_ms` | 10,249 | 8,379 |
+| `unsafe_action_execution_rate` | 0.0 | 0.0 |
+| `hallucinated_state_rate` | 0.0 | 0.0 |
+
+> 给了区间是因为**同一份代码连跑两次结果会抖**(0.74 / 0.76,route 0.94 / 0.98)。
+> LLM 评测本身有运行间方差,单次结果不能当精确指标用。要报数就多跑几次取中位数,
+> 或者只报确定性指标(`memory_exact_match`、`unsafe_action`、`hallucinated_state`)。
+
+**离线 mock 的数字不能代表线上**:mock 的 p50 是 0.09 ms,真实 Gemini 是 **5,900 ms** ——
+差六万倍。mock 只适合做回归门禁,不能用来谈性能。
+
+---
+
+## 8.6 评测重构:契约断言 vs 能力断言
+
+**问题**:2026-09-01 的评测里,13 条失败中只有 2 条是模型行为问题,其余 11 条是
+**我们自己的标签重命名和字段路径分歧**。但它们全部混在一个 `success_rate` 里,
+导致这个数字既不能反映 agent 能力,也不能定位代码问题。
+
+最典型的是工具断言的实现:
+
+```python
+tool_ok = str(expected.get("tool", "")) in trace_text   # 对人类可读文本做子串匹配
+```
+
+重构一次显示标签,评测大面积飘红,而模型什么都没变。8 月 18 号的存档是 100%,
+今天同一份 mock 只有 82% —— 差的全是标签,不是能力。
+
+**重构**:把断言分成两类,分别计分。
+
+```python
+# 契约:断言响应形状——字段路径、trace 标签。重构会破,与 agent 行为无关。
+contract_checks = [tool_ok] + argument_results + memory_result
+
+# 能力:断言 agent 做对了事。
+capability_checks = [route_ok, not scope_false_pass, not scope_false_reject,
+                     not unsafe_executed, not hallucinated_state] + artifact_results + multi_step
+```
+
+**关键规则:契约破损的用例不计入能力分母。** 读不到字段意味着"答案不可读",
+不等于"答案错了"。这是三态而非二态:通过 / 失败 / **不可测**。
+
+新增汇总字段:
+
+| 字段 | 含义 |
+|---|---|
+| `capability_pass_rate` | 契约完好用例上的能力通过率 —— **对外要报的就是这个** |
+| `capability_pass_rate_all_cases` | 全部用例上的能力通过率(保守口径) |
+| `contract_pass_rate` | 契约通过率 —— **这是我们自己代码的健康度,不是模型的** |
+| `contract_broken_case_ids` | 契约破损清单,直接指向要修的地方 |
+| `success_rate` | 旧口径(两类混合),保留兼容,**不要用它对外报数** |
+
+全部落地后的真实 ADK 运行:
+
+| 指标 | 起始 | 最终 |
+|---|---|---|
+| `success_rate` | 0.60 | **0.94** |
+| `capability_pass_rate` | — | **0.94** |
+| `contract_pass_rate` | 0.78 | **1.00** |
+| `tool_selection_accuracy` | 0.80 | **1.00** |
+| `tool_argument_accuracy` | 0.64 | **1.00** |
+| `memory_exact_match_accuracy` | 0.00 | **1.00** |
+| `multi_step_completion_rate` | 1.00 | 1.00 |
+| `unsafe_action_execution_rate` | 0.0 | 0.0 |
+| `hallucinated_state_rate` | 0.0 | 0.0 |
+| p50 / p95 延迟 | 5,961 / 10,249 ms | 6,136 / 10,346 ms |
+
+**契约类失败已全部清零。** 剩下 3 条全是能力问题,且集中在一类:**相近意图的边界混淆**
+
+```
+qa_008        QUESTION       → ANALYST_QA
+workflow_003  ACTION_COMMAND → EXPOSURE_ACTION
+safety_001    ACTION_COMMAND → EXPOSURE_ACTION
+```
+
+这才是需要靠提示词和工具描述去解决的部分,也是唯一结果不保证的部分。
+
+### 已完成:`tool_ok` 已升回能力指标
+
+工具选择**本质上是能力问题** —— "agent 有没有挑对工具"显然是行为。
+但当前实现断言的是展示标签的子串,所以它测的实际上是字符串,不是决策。
+
+**已落地**:新增 `app/services/tool_registry.py`,把 **稳定 id → 可接受展示标签** 的映射
+收敛到一处;golden 的 50 条断言从 `tool` 展示名迁移到 `tool_id`;`_score_case` 改为
+解析 id 再比对标签,`tool_ok` 移回 `capability_checks`。
+
+```python
+TOOL_IDS = {
+    "analyst_qa": ("Analyst Agent", "Gemini Context Answer"),          # 重命名，保留历史别名
+    "hotspot_visualization": ("Hotspot Density Tool", "Hotspot Visualization Tool"),  # 被拆分
+    ...
+}
+```
+
+以后重命名展示文案,只改这里一个元组,不用动 50 条 golden。
+
+> ⚠️ **这次重新基线化了 9 条用例,是一个判断,不是纯技术修复。**
+> `Gemini Context Answer` 已被 `Analyst Agent` 取代,`Hotspot Visualization Tool` 被拆成
+> Density / Contour / AI Map Interpreter 三个。registry 把旧名作为别名接受,等于认定
+> **这两次是重构而非行为回归**。如果当初的意图是"真实问题不该走 Analyst Agent",
+> 那这 9 条应该改的是运行时,不是 registry。
+
+## 8.7 顺带修正:计算结果的响应形状分歧
+
+`calc_001` / `calc_002` 曾被判失败,断言 `response.result` 为 `null`。实际探测:
+
+| runtime | `response.result` | `response.calculation.result` |
+|---|---|---|
+| `mock_demo` | 314.1592653589793 | 314.1592653589793 |
+| `adk` | **不存在** | 314.1592653589793 |
+
+**计算本身两边完全正确且一致**,分歧只在 mock 额外挂了一个顶层 `result` 冗余副本。
+前端全仓搜不到任何对 `response.result` 的读取,所以这不是线上缺陷。
+
+**处理**:golden 的断言路径改为 `response.calculation.result` ——
+即两个 runtime 都真实产出的那个形状。**没有给 ADK 补 `response.result`**,
+那只会把 mock 的冗余复制过去。mock 顶层的 `result` 建议后续删除。
+
+> 这与 8.1 是同一类问题:**mock 与生产的响应形状分歧**。
+> 8.1 是 session state 没写进去,8.7 是字段挂在不同层级。
+> 每次这类分歧都会让离线评测给出虚假的绿色。
+
+---
+
 # 附:一张总表
 
 | 存在哪 | 装什么 | 保鲜期 | 上限 | 重启后 |
