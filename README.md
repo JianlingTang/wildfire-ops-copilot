@@ -13,6 +13,14 @@
 
 ---
 
+## Video demo
+
+**[▶ Watch the 4:40 Wildfire Ops Copilot walkthrough (720p)](https://github.com/JianlingTang/wildfire-ops-copilot/releases/download/demo-video-v1/WildfireOps_Demo_720p.mov)**
+
+The walkthrough covers the live hotspot overview, AOI focus, evidence-grounded analysis, risk scoring, agent traces, what-if scenarios, and the human approval gate for public advisories.
+
+---
+
 ## What it does
 
 - 📍 Focuses live Australian DEA hotspot AOIs by state and radius
